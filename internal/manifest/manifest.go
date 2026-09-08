@@ -20,6 +20,9 @@ type Item struct {
 	Reference string `json:"reference"`
 	// Category groups clips by what they stress: names, numbers, acronyms…
 	Category string `json:"category"`
+	// Keyterms are the words that matter in this clip — names, product terms,
+	// codes. They get their own recall metric, separate from WER.
+	Keyterms []string `json:"keyterms,omitempty"`
 }
 
 // Load reads a JSONL manifest. Relative audio paths resolve against the
@@ -32,6 +35,7 @@ func Load(path string) ([]Item, error) {
 	defer f.Close()
 
 	base := filepath.Dir(path)
+	refByAudio := map[string]string{}
 	var items []Item
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -58,6 +62,10 @@ func Load(path string) ([]Item, error) {
 		if _, err := os.Stat(it.Audio); err != nil {
 			return nil, fmt.Errorf("%s:%d: audio file: %w", path, line, err)
 		}
+		if prev, ok := refByAudio[it.Audio]; ok && prev != it.Reference {
+			return nil, fmt.Errorf("%s:%d: %s appears twice with different references", path, line, it.Audio)
+		}
+		refByAudio[it.Audio] = it.Reference
 		items = append(items, it)
 	}
 	if err := sc.Err(); err != nil {

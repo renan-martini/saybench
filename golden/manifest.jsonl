@@ -1,14 +1,14 @@
-{"audio": "audio/greeting-callback.wav", "reference": "Hi this is Marcus Aurelio calling back about the appointment for Beatriz Nakamura on Thursday", "category": "names"}
-{"audio": "audio/transfer-request.wav", "reference": "Could you transfer me to Priya Raghunathan in the billing department please", "category": "names"}
-{"audio": "audio/email-spellout.wav", "reference": "My last name is spelled G U T I E R R E Z and my email is gutierrez seven at gmail dot com", "category": "spelled_name"}
-{"audio": "audio/confirmation-code.wav", "reference": "The confirmation code is B as in bravo X ray seven four T as in tango", "category": "spelled_name"}
-{"audio": "audio/policy-number.wav", "reference": "My policy number is four seven three nine zero two eight and my zip code is one one two zero five", "category": "numbers"}
-{"audio": "audio/payment-amount.wav", "reference": "I would like to pay two hundred forty seven dollars and sixty three cents on the fifteenth", "category": "numbers"}
-{"audio": "audio/reschedule.wav", "reference": "Can we reschedule from Tuesday March third at two thirty to Friday the sixth at nine fifteen in the morning", "category": "date_time"}
-{"audio": "audio/availability.wav", "reference": "I am available any weekday after four PM except Wednesdays until the end of October", "category": "date_time"}
-{"audio": "audio/insurance-jargon.wav", "reference": "I need to check if my HMO covers the MRI and whether I have met my PPO deductible", "category": "acronyms"}
-{"audio": "audio/tech-support.wav", "reference": "The API returns a 401 after the OAuth token expires and the SDK retries over HTTPS", "category": "acronyms"}
-{"audio": "audio/deploy-issue.wav", "reference": "The Kubernetes deployment failed because the PostgreSQL migration timed out during the rollout", "category": "technical"}
-{"audio": "audio/latency-report.wav", "reference": "Latency spiked to seven hundred milliseconds at the ninety fifth percentile after the cache eviction", "category": "technical"}
-{"audio": "audio/hesitation.wav", "reference": "Yeah so um I was thinking maybe we could you know push the whole thing to next week honestly", "category": "conversational"}
-{"audio": "audio/interruption.wav", "reference": "Wait actually before you do that can you first check whether the previous order ever shipped", "category": "conversational"}
+{"audio": "audio/greeting-callback.wav", "reference": "Hi this is Marcus Aurelio calling back about the appointment for Beatriz Nakamura on Thursday", "category": "names", "keyterms": ["Marcus Aurelio", "Beatriz Nakamura", "Thursday"]}
+{"audio": "audio/transfer-request.wav", "reference": "Could you transfer me to Priya Raghunathan in the billing department please", "category": "names", "keyterms": ["Priya Raghunathan", "billing"]}
+{"audio": "audio/email-spellout.wav", "reference": "My last name is spelled G U T I E R R E Z and my email is gutierrez seven at gmail dot com", "category": "spelled_name", "keyterms": ["G U T I E R R E Z"]}
+{"audio": "audio/confirmation-code.wav", "reference": "The confirmation code is B as in bravo X ray seven four T as in tango", "category": "spelled_name", "keyterms": ["bravo", "tango"]}
+{"audio": "audio/policy-number.wav", "reference": "My policy number is four seven three nine zero two eight and my zip code is one one two zero five", "category": "numbers", "keyterms": ["four seven three nine zero two eight"]}
+{"audio": "audio/payment-amount.wav", "reference": "I would like to pay two hundred forty seven dollars and sixty three cents on the fifteenth", "category": "numbers", "keyterms": ["two hundred forty seven dollars", "fifteenth"]}
+{"audio": "audio/reschedule.wav", "reference": "Can we reschedule from Tuesday March third at two thirty to Friday the sixth at nine fifteen in the morning", "category": "date_time", "keyterms": ["Tuesday March third", "Friday"]}
+{"audio": "audio/availability.wav", "reference": "I am available any weekday after four PM except Wednesdays until the end of October", "category": "date_time", "keyterms": ["four PM", "Wednesdays", "October"]}
+{"audio": "audio/insurance-jargon.wav", "reference": "I need to check if my HMO covers the MRI and whether I have met my PPO deductible", "category": "acronyms", "keyterms": ["HMO", "MRI", "PPO", "deductible"]}
+{"audio": "audio/tech-support.wav", "reference": "The API returns a 401 after the OAuth token expires and the SDK retries over HTTPS", "category": "acronyms", "keyterms": ["API", "OAuth", "SDK", "HTTPS"]}
+{"audio": "audio/deploy-issue.wav", "reference": "The Kubernetes deployment failed because the PostgreSQL migration timed out during the rollout", "category": "technical", "keyterms": ["Kubernetes", "PostgreSQL", "migration"]}
+{"audio": "audio/latency-report.wav", "reference": "Latency spiked to seven hundred milliseconds at the ninety fifth percentile after the cache eviction", "category": "technical", "keyterms": ["seven hundred milliseconds", "ninety fifth percentile"]}
+{"audio": "audio/hesitation.wav", "reference": "Yeah so um I was thinking maybe we could you know push the whole thing to next week honestly", "category": "conversational", "keyterms": ["next week"]}
+{"audio": "audio/interruption.wav", "reference": "Wait actually before you do that can you first check whether the previous order ever shipped", "category": "conversational", "keyterms": ["previous order"]}

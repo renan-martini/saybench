@@ -93,3 +93,39 @@ func Compute(reference, hypothesis string) Counts {
 	}
 	return c
 }
+
+// KeytermHits checks which terms appear in the hypothesis as exact word
+// sequences (after the same normalization as WER). It answers the question a
+// corpus-level WER hides: did the transcript get the words that matter — the
+// names, product terms, and codes — regardless of how the filler fared?
+func KeytermHits(hypothesis string, terms []string) (hit, missed []string) {
+	hyp := Normalize(hypothesis)
+	for _, term := range terms {
+		want := Normalize(term)
+		if len(want) == 0 {
+			continue
+		}
+		if containsSeq(hyp, want) {
+			hit = append(hit, term)
+		} else {
+			missed = append(missed, term)
+		}
+	}
+	return hit, missed
+}
+
+func containsSeq(words, seq []string) bool {
+	if len(seq) > len(words) {
+		return false
+	}
+outer:
+	for i := 0; i+len(seq) <= len(words); i++ {
+		for j := range seq {
+			if words[i+j] != seq[j] {
+				continue outer
+			}
+		}
+		return true
+	}
+	return false
+}

@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>saybench dashboard</title>
+<style>
+  /* Palette: validated categorical set (adjacent-pair CVD ΔE ≥ 8 in both
+     modes), light-first with dark via prefers-color-scheme. */
+  :root {
+    color-scheme: light dark;
+    --surface: #fcfcfb;
+    --surface-raised: #f4f4f2;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --ink-3: #8b8a85;
+    --line: #e4e3df;
+    --good: #008300;
+    --bad: #c62f2f;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+    --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #1a1a19;
+      --surface-raised: #232322;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --ink-3: #82817a;
+      --line: #343432;
+      --good: #35b535;
+      --bad: #e66767;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+      --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--surface);
+    color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    padding: 2.5rem 1.25rem 4rem;
+  }
+  .wrap { max-width: 62rem; margin: 0 auto; }
+  header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem; }
+  h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
+  h1 span { color: var(--ink-3); font-weight: 400; }
+  .meta { font-family: ui-monospace, monospace; font-size: 0.75rem; color: var(--ink-3); }
+
+  section { margin-bottom: 2.5rem; }
+  h2 { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-2); margin-bottom: 0.75rem; }
+  .note { color: var(--ink-3); font-size: 0.85rem; }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem 1.2rem; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; margin-bottom: 0.6rem; font-size: 0.8rem; color: var(--ink-2); }
+  .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: baseline; }
+
+  svg { display: block; width: 100%; height: auto; }
+  svg text { font: 11px ui-sans-serif, system-ui, sans-serif; fill: var(--ink-2); }
+  svg .val { fill: var(--ink); font-weight: 600; }
+  svg .axis { stroke: var(--line); stroke-width: 1; }
+  svg .grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 3; }
+
+  .controls { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; font-size: 0.85rem; color: var(--ink-2); }
+  select {
+    font: inherit; color: var(--ink); background: var(--surface-raised);
+    border: 1px solid var(--line); border-radius: 8px; padding: 0.3rem 0.5rem;
+  }
+  select:focus-visible { outline: 2px solid var(--s1); outline-offset: 1px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { text-align: left; font-weight: 600; color: var(--ink-2); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.45rem 0.75rem 0.45rem 0; border-bottom: 1px solid var(--line); }
+  td { padding: 0.45rem 0.75rem 0.45rem 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; vertical-align: top; }
+  td.mono, .mono { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+  .up { color: var(--bad); font-weight: 600; }
+  .down { color: var(--good); font-weight: 600; }
+  .missed { color: var(--bad); }
+
+  #tip {
+    position: fixed; pointer-events: none; z-index: 10; display: none;
+    background: var(--ink); color: var(--surface);
+    font: 12px/1.5 ui-sans-serif, system-ui, sans-serif;
+    padding: 0.45rem 0.65rem; border-radius: 8px; max-width: 280px;
+  }
+  #tip b { font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>saybench <span>dashboard</span></h1>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section id="sec-summary">
+    <h2>Latest run</h2>
+    <div class="card" id="summary"></div>
+  </section>
+
+  <section id="sec-ab">
+    <h2>A / B — compare two runs</h2>
+    <div class="card">
+      <div class="controls">
+        <label>baseline <select id="selA"></select></label>
+        <span>→</span>
+        <label>candidate <select id="selB"></select></label>
+      </div>
+      <div id="ab"></div>
+    </div>
+  </section>
+
+  <section id="sec-trend">
+    <h2>WER across runs</h2>
+    <div class="card"><div class="legend" id="legend-trend"></div><div id="trend"></div></div>
+  </section>
+
+  <div class="grid2">
+    <section id="sec-cat">
+      <h2>WER by category — latest run</h2>
+      <div class="card"><div class="legend" id="legend-cat"></div><div id="cats"></div></div>
+    </section>
+    <section id="sec-lat">
+      <h2>Latency — latest run</h2>
+      <div class="card"><div id="lat"></div></div>
+    </section>
+  </div>
+
+  <section id="sec-kt">
+    <h2>Keyterm recall — latest run</h2>
+    <div class="card"><div id="kt"></div></div>
+  </section>
+
+  <section id="sec-worst">
+    <h2>Worst clips — latest run</h2>
+    <div class="card" style="overflow-x:auto"><div id="worst"></div></div>
+  </section>
+</div>
+<div id="tip" role="status"></div>
+
+<script id="data" type="application/json">__SAYBENCH_DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const runs = DATA.runs;
+const latest = runs[runs.length - 1];
+
+// ---- provider identity: fixed slot order, stable across every chart ----
+const providers = [...new Set(runs.flatMap(r => (r.summaries || []).map(s => s.provider)))].sort();
+const SLOTS = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
+const colorOf = p => `var(${SLOTS[providers.indexOf(p) % SLOTS.length]})`;
+
+const pct = w => (w == null || w < 0) ? "—" : (w * 100).toFixed(1) + "%";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const runLabel = (r, i) => `#${i + 1} · ${new Date(r.created_at).toISOString().slice(0, 16).replace("T", " ")}`;
+
+document.getElementById("meta").textContent =
+  `${runs.length} run${runs.length > 1 ? "s" : ""} · generated ${new Date(DATA.generated_at).toISOString().slice(0,16).replace("T"," ")} · v${DATA.version}`;
+
+// ---- shared tooltip ----
+const tip = document.getElementById("tip");
+function bindTips(root) {
+  root.querySelectorAll("[data-tip]").forEach(el => {
+    el.addEventListener("mousemove", e => {
+      tip.innerHTML = el.dataset.tip;
+      tip.style.display = "block";
+      const w = tip.offsetWidth;
+      tip.style.left = Math.min(e.clientX + 12, innerWidth - w - 8) + "px";
+      tip.style.top = (e.clientY + 14) + "px";
+    });
+    el.addEventListener("mouseleave", () => tip.style.display = "none");
+  });
+}
+
+// ---- latest-run summary table ----
+{
+  const rows = (latest.summaries || []).map(s => `<tr>
+    <td><span class="sw" style="background:${colorOf(s.provider)};display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px"></span>${esc(s.provider)}</td>
+    <td>${s.items}</td><td>${s.errors}</td><td class="mono">${pct(s.wer)}</td>
+    <td class="mono">${pct(s.keyterm_recall)}</td>
+    <td class="mono">${s.avg_latency_ms}ms</td><td class="mono">${s.p95_latency_ms}ms</td></tr>`).join("");
+  document.getElementById("summary").innerHTML =
+    `<table><thead><tr><th>provider</th><th>clips</th><th>errors</th><th>wer</th><th>keyterm recall</th><th>avg latency</th><th>p95</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// ---- A/B compare ----
+{
+  const selA = document.getElementById("selA"), selB = document.getElementById("selB");
+  runs.forEach((r, i) => {
+    selA.add(new Option(runLabel(r, i), i));
+    selB.add(new Option(runLabel(r, i), i));
+  });
+  selA.value = Math.max(0, runs.length - 2);
+  selB.value = runs.length - 1;
+  const render = () => {
+    const A = runs[+selA.value], B = runs[+selB.value];
+    const by = Object.fromEntries((A.summaries || []).map(s => [s.provider, s]));
+    const rows = (B.summaries || []).map(b => {
+      const a = by[b.provider];
+      if (!a) return `<tr><td>${esc(b.provider)}</td><td colspan="4" class="note">only in candidate</td></tr>`;
+      const chg = (a.wer < 0 || b.wer < 0) ? null : (b.wer - a.wer) * 100;
+      const cls = chg == null ? "" : chg > 0.05 ? "up" : chg < -0.05 ? "down" : "";
+      const sign = chg == null ? "—" : (chg >= 0 ? "+" : "") + chg.toFixed(1) + "pp";
+      return `<tr><td><span style="background:${colorOf(b.provider)};display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px"></span>${esc(b.provider)}</td>
+        <td class="mono">${pct(a.wer)} → ${pct(b.wer)}</td><td class="${cls}">${sign}</td>
+        <td class="mono">${pct(a.keyterm_recall)} → ${pct(b.keyterm_recall)}</td>
+        <td class="mono">${a.avg_latency_ms}ms → ${b.avg_latency_ms}ms</td></tr>`;
+    }).join("");
+    document.getElementById("ab").innerHTML =
+      `<table><thead><tr><th>provider</th><th>wer</th><th>change</th><th>keyterm recall</th><th>avg latency</th></tr></thead><tbody>${rows}</tbody></table>`;
+  };
+  selA.onchange = selB.onchange = render;
+  render();
+  if (runs.length < 2) document.getElementById("sec-ab").querySelector(".controls").insertAdjacentHTML("beforeend",
+    `<span class="note">one run so far — pass more report files to compare</span>`);
+}
+
+// ---- WER trend (line, one series per provider) ----
+{
+  const el = document.getElementById("trend");
+  if (runs.length < 2) {
+    el.innerHTML = `<p class="note">Trends appear once there are two or more runs.</p>`;
+    document.getElementById("legend-trend").remove();
+  } else {
+    const W = 900, H = 240, L = 44, R = 60, T = 14, B = 28;
+    const series = providers.map(p => runs.map(r => {
+      const s = (r.summaries || []).find(x => x.provider === p);
+      return s && s.wer >= 0 ? s.wer * 100 : null;
+    }));
+    const max = Math.max(5, ...series.flat().filter(v => v != null)) * 1.15;
+    const x = i => L + (W - L - R) * (runs.length === 1 ? 0.5 : i / (runs.length - 1));
+    const y = v => T + (H - T - B) * (1 - v / max);
+    let g = "";
+    for (let t = 0; t <= 4; t++) {
+      const v = max * t / 4, yy = y(v);
+      g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}"/>` +
+           `<text x="${L - 6}" y="${yy + 4}" text-anchor="end">${v.toFixed(0)}%</text>`;
+    }
+    runs.forEach((r, i) => g += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">#${i + 1}</text>`);
+    providers.forEach((p, pi) => {
+      const pts = series[pi].map((v, i) => v == null ? null : [x(i), y(v)]);
+      const path = pts.map((pt, i) => pt ? `${i && pts[i-1] ? "L" : "M"}${pt[0]},${pt[1]}` : "").join("");
+      g += `<path d="${path}" fill="none" stroke="${colorOf(p)}" stroke-width="2" stroke-linecap="round"/>`;
+      pts.forEach((pt, i) => { if (!pt) return;
+        g += `<circle cx="${pt[0]}" cy="${pt[1]}" r="4" fill="${colorOf(p)}" stroke="var(--surface)" stroke-width="2"
+               data-tip="<b>${esc(p)}</b><br>${esc(runLabel(runs[i], i))}<br>WER ${series[pi][i].toFixed(1)}%"/>`;
+      });
+      const last = pts.filter(Boolean).pop();
+      if (last) g += `<text class="val" x="${last[0] + 8}" y="${last[1] + 4}">${series[pi][runs.length-1] != null ? series[pi][runs.length-1].toFixed(1) + "%" : ""}</text>`;
+    });
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Word error rate across runs, one line per provider">${g}<line class="axis" x1="${L}" x2="${W-R}" y1="${H-B}" y2="${H-B}"/></svg>`;
+    document.getElementById("legend-trend").innerHTML =
+      providers.map(p => `<span><span class="sw" style="background:${colorOf(p)}"></span>${esc(p)}</span>`).join("");
+    bindTips(el);
+  }
+}
+
+// ---- grouped horizontal bars: WER by category ----
+function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width) {
+  // rows: [{label, series:[{provider, value}]}]
+  const W = width || 440, L = 118, R = 52, barH = 14, gap = 2, groupGap = 14;
+  const max = Math.max(maxHint || 0, ...rows.flatMap(r => r.series.map(s => valueOf(s) || 0))) * 1.12 || 1;
+  let yPos = 8, g = "";
+  rows.forEach(r => {
+    g += `<text x="${L - 8}" y="${yPos + (r.series.length * (barH + gap)) / 2 + 4}" text-anchor="end">${esc(r.label)}</text>`;
+    r.series.forEach(s => {
+      const v = valueOf(s);
+      const w = v == null ? 0 : Math.max(2, (W - L - R) * v / max);
+      g += `<rect x="${L}" y="${yPos}" width="${w}" height="${barH}" rx="3" fill="${colorOf(s.provider)}" data-tip="${tipOf(r, s)}"/>`;
+      g += `<text class="val" x="${L + w + 6}" y="${yPos + barH - 3}">${v == null ? "—" : fmt(v)}</text>`;
+      yPos += barH + gap;
+    });
+    yPos += groupGap;
+  });
+  const H = yPos + 4;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">${g}<line class="axis" x1="${L}" x2="${L}" y1="4" y2="${H - 6}"/></svg>`;
+  bindTips(el);
+}
+{
+  const cats = [...new Set((latest.categories || []).map(c => c.category))].sort();
+  const rows = cats.map(cat => ({
+    label: cat,
+    series: providers
+      .map(p => (latest.categories || []).find(c => c.provider === p && c.category === cat))
+      .filter(Boolean).map(c => ({ provider: c.provider, wer: c.wer })),
+  }));
+  hbars(document.getElementById("cats"), rows,
+    s => s.wer < 0 ? null : s.wer * 100, v => v.toFixed(1) + "%",
+    (r, s) => `<b>${esc(s.provider)}</b><br>${esc(r.label)}: WER ${pct(s.wer)}`);
+  document.getElementById("legend-cat").innerHTML =
+    providers.map(p => `<span><span class="sw" style="background:${colorOf(p)}"></span>${esc(p)}</span>`).join("");
+}
+
+// ---- latency bars (avg, with p95 tick) ----
+{
+  const rows = (latest.summaries || []).map(s => ({ label: s.provider, series: [{ provider: s.provider, avg: s.avg_latency_ms, p95: s.p95_latency_ms }] }));
+  const el = document.getElementById("lat");
+  const W = 440, L = 118, R = 64, barH = 16;
+  const max = Math.max(...rows.map(r => r.series[0].p95), 1) * 1.15;
+  let yPos = 8, g = "";
+  rows.forEach(r => {
+    const s = r.series[0];
+    const w = Math.max(2, (W - L - R) * s.avg / max);
+    const xp = L + (W - L - R) * s.p95 / max;
+    g += `<text x="${L - 8}" y="${yPos + barH - 3}" text-anchor="end">${esc(r.label)}</text>`;
+    g += `<rect x="${L}" y="${yPos}" width="${w}" height="${barH}" rx="3" fill="${colorOf(s.provider)}"
+           data-tip="<b>${esc(s.provider)}</b><br>avg ${s.avg}ms · p95 ${s.p95}ms"/>`;
+    g += `<line x1="${xp}" x2="${xp}" y1="${yPos - 2}" y2="${yPos + barH + 2}" stroke="var(--ink-2)" stroke-width="2"/>`;
+    g += `<text class="val" x="${L + w + 6}" y="${yPos + barH - 3}">${s.avg}ms</text>`;
+    yPos += barH + 14;
+  });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${yPos + 4}">${g}<line class="axis" x1="${L}" x2="${L}" y1="4" y2="${yPos - 6}"/></svg>
+    <p class="note" style="margin-top:.4rem">bar = average · tick = p95 · batch round-trip including upload</p>`;
+  bindTips(el);
+}
+
+// ---- keyterm recall ----
+{
+  const withKt = (latest.summaries || []).filter(s => s.keyterm_recall >= 0);
+  const sec = document.getElementById("sec-kt");
+  if (!withKt.length) sec.remove();
+  else {
+    const rows = withKt.map(s => ({ label: s.provider, series: [{ provider: s.provider, v: s.keyterm_recall * 100 }] }));
+    hbars(document.getElementById("kt"), rows,
+      s => s.v, v => v.toFixed(1) + "%",
+      (r, s) => `<b>${esc(s.provider)}</b><br>keyterm recall ${s.v.toFixed(1)}%`, 100, 900);
+  }
+}
+
+// ---- worst clips ----
+{
+  const items = (latest.items || []).filter(i => !i.error).sort((a, b) => b.wer - a.wer).slice(0, 10);
+  const rows = items.map(i => `<tr>
+    <td class="mono">${esc(i.audio.split("/").pop())}</td>
+    <td>${esc(i.category)}</td>
+    <td>${esc(i.provider)}</td>
+    <td class="mono">${pct(i.wer)}</td>
+    <td class="mono">${i.sub}s ${i.del}d ${i.ins}i</td>
+    <td class="missed mono">${(i.missed_keyterms || []).map(esc).join(", ") || "—"}</td></tr>`).join("");
+  document.getElementById("worst").innerHTML =
+    `<table><thead><tr><th>clip</th><th>category</th><th>provider</th><th>wer</th><th>edits</th><th>missed keyterms</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const errs = (latest.items || []).filter(i => i.error).length;
+  if (errs) document.getElementById("worst").insertAdjacentHTML("beforeend", `<p class="note" style="margin-top:.5rem">${errs} item(s) errored — see the JSON report.</p>`);
+}
+</script>
+</body>
+</html>

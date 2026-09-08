@@ -88,8 +88,13 @@ func contentTypeFor(path string) string {
 // reference text) so it can produce deterministic near-miss transcripts.
 func FromSpecs(specs string, refs map[string]string) ([]Provider, error) {
 	var out []Provider
+	seen := map[string]bool{}
 	for _, s := range strings.Split(specs, ",") {
 		s = strings.TrimSpace(strings.ToLower(s))
+		if s != "" && seen[s] {
+			return nil, fmt.Errorf("provider %q listed twice", s)
+		}
+		seen[s] = true
 		switch s {
 		case "":
 			continue

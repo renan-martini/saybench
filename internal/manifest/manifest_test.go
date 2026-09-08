@@ -18,11 +18,12 @@ func write(t *testing.T, dir, name, content string) string {
 func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "a.wav", "fake-audio")
+	write(t, dir, "b.wav", "fake-audio")
 	mf := write(t, dir, "manifest.jsonl",
 		`{"audio":"a.wav","reference":"hello world","category":"names"}
 // a comment line
 
-{"audio":"a.wav","reference":"second clip"}
+{"audio":"b.wav","reference":"second clip"}
 `)
 	items, err := Load(mf)
 	if err != nil {
@@ -52,5 +53,17 @@ func TestLoadRejectsEmptyManifest(t *testing.T) {
 	mf := write(t, dir, "manifest.jsonl", "\n// nothing\n")
 	if _, err := Load(mf); err == nil {
 		t.Fatal("expected error for empty manifest")
+	}
+}
+
+func TestLoadRejectsConflictingDuplicateAudio(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "a.wav", "x")
+	mf := write(t, dir, "manifest.jsonl",
+		`{"audio":"a.wav","reference":"first"}
+{"audio":"a.wav","reference":"second"}
+`)
+	if _, err := Load(mf); err == nil {
+		t.Fatal("expected error for conflicting duplicate audio")
 	}
 }

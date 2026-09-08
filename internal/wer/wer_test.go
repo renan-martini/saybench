@@ -45,3 +45,19 @@ func TestNormalize(t *testing.T) {
 		}
 	}
 }
+
+func TestKeytermHits(t *testing.T) {
+	hyp := "hi this is marcus aurelio calling about the mri appointment"
+	hit, missed := KeytermHits(hyp, []string{"Marcus Aurelio", "MRI", "Beatriz Nakamura", ""})
+	if len(hit) != 2 || hit[0] != "Marcus Aurelio" || hit[1] != "MRI" {
+		t.Fatalf("hit = %v", hit)
+	}
+	if len(missed) != 1 || missed[0] != "Beatriz Nakamura" {
+		t.Fatalf("missed = %v", missed)
+	}
+	// Partial word must not match: "aurelios" is not "aurelio".
+	hit, _ = KeytermHits("marcus aurelios", []string{"Marcus Aurelio"})
+	if len(hit) != 0 {
+		t.Fatalf("partial word matched: %v", hit)
+	}
+}

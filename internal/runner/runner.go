@@ -97,5 +97,11 @@ func runOne(ctx context.Context, p provider.Provider, it manifest.Item, timeout 
 	c := wer.Compute(it.Reference, out.Text)
 	res.Sub, res.Del, res.Ins, res.RefWords = c.Sub, c.Del, c.Ins, c.RefWords
 	res.WER = c.WER()
+	if len(it.Keyterms) > 0 {
+		hit, missed := wer.KeytermHits(out.Text, it.Keyterms)
+		res.KeytermsTotal = len(it.Keyterms)
+		res.KeytermsHit = len(hit)
+		res.MissedKeyterms = missed
+	}
 	return res
 }

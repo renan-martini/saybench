@@ -26,19 +26,29 @@ type ItemResult struct {
 	Ins        int     `json:"ins"`
 	RefWords   int     `json:"ref_words"`
 	LatencyMS  int64   `json:"latency_ms"`
-	Error      string  `json:"error,omitempty"`
+	// Keyterm recall: of the clip's important terms, how many survived
+	// transcription intact. MissedKeyterms names the casualties.
+	KeytermsTotal  int      `json:"keyterms_total,omitempty"`
+	KeytermsHit    int      `json:"keyterms_hit,omitempty"`
+	MissedKeyterms []string `json:"missed_keyterms,omitempty"`
+	Error          string   `json:"error,omitempty"`
 }
 
 // Summary aggregates one provider across the corpus. WER is corpus-level:
 // total edits over total reference words, not an average of per-clip rates —
-// so long clips weigh more, which is the standard convention.
+// so long clips weigh more, which is the standard convention. When every item
+// errored there is no corpus to score: WER is -1 and renders as "—", never as
+// a flattering 0%.
 type Summary struct {
-	Provider     string  `json:"provider"`
-	Items        int     `json:"items"`
-	Errors       int     `json:"errors"`
-	WER          float64 `json:"wer"`
-	AvgLatencyMS int64   `json:"avg_latency_ms"`
-	P95LatencyMS int64   `json:"p95_latency_ms"`
+	Provider string  `json:"provider"`
+	Items    int     `json:"items"`
+	Errors   int     `json:"errors"`
+	WER      float64 `json:"wer"`
+	// KeytermRecall is corpus-level (total hits over total terms); -1 when
+	// the corpus defines no keyterms.
+	KeytermRecall float64 `json:"keyterm_recall"`
+	AvgLatencyMS  int64   `json:"avg_latency_ms"`
+	P95LatencyMS  int64   `json:"p95_latency_ms"`
 }
 
 // CategorySummary aggregates one provider within one failure-mode category.
@@ -65,6 +75,7 @@ type Report struct {
 func Build(toolVersion, manifestPath string, items []ItemResult) Report {
 	type agg struct {
 		edits, words, errs, n int
+		ktHit, ktTotal        int
 		latencies             []int64
 	}
 	byProvider := map[string]*agg{}
@@ -90,20 +101,32 @@ func Build(toolVersion, manifestPath string, items []ItemResult) Report {
 			}
 			x.edits += it.Sub + it.Del + it.Ins
 			x.words += it.RefWords
+			x.ktHit += it.KeytermsHit
+			x.ktTotal += it.KeytermsTotal
 			x.latencies = append(x.latencies, it.LatencyMS)
 		}
 	}
 
 	rate := func(a *agg) float64 {
 		if a.words == 0 {
+			if a.errs > 0 {
+				return -1 // nothing scored — do not report a perfect 0%
+			}
 			return 0
 		}
 		return float64(a.edits) / float64(a.words)
 	}
 
+	recall := func(a *agg) float64 {
+		if a.ktTotal == 0 {
+			return -1
+		}
+		return float64(a.ktHit) / float64(a.ktTotal)
+	}
+
 	var summaries []Summary
 	for p, a := range byProvider {
-		s := Summary{Provider: p, Items: a.n, Errors: a.errs, WER: rate(a)}
+		s := Summary{Provider: p, Items: a.n, Errors: a.errs, WER: rate(a), KeytermRecall: recall(a)}
 		if len(a.latencies) > 0 {
 			sort.Slice(a.latencies, func(i, j int) bool { return a.latencies[i] < a.latencies[j] })
 			var sum int64

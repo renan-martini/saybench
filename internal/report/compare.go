@@ -4,22 +4,25 @@ import "fmt"
 
 // Delta is the change in one provider's summary between two runs.
 type Delta struct {
-	Provider             string
-	OldWER, NewWER       float64
-	WERChange            float64 // percentage points, positive = worse
-	OldLatMS, NewLatMS   int64
-	OnlyInOld, OnlyInNew bool
+	Provider  string  `json:"provider"`
+	OldWER    float64 `json:"old_wer"`
+	NewWER    float64 `json:"new_wer"`
+	WERChange float64 `json:"wer_change_pp"` // percentage points, positive = worse
+	OldLatMS  int64   `json:"old_avg_latency_ms"`
+	NewLatMS  int64   `json:"new_avg_latency_ms"`
+	OnlyInOld bool    `json:"only_in_old,omitempty"`
+	OnlyInNew bool    `json:"only_in_new,omitempty"`
 }
 
 // Compare aligns two reports by provider name.
-func Compare(old, new Report) []Delta {
+func Compare(old, cur Report) []Delta {
 	oldBy := map[string]Summary{}
 	for _, s := range old.Summaries {
 		oldBy[s.Provider] = s
 	}
 	seen := map[string]bool{}
 	var out []Delta
-	for _, n := range new.Summaries {
+	for _, n := range cur.Summaries {
 		seen[n.Provider] = true
 		o, ok := oldBy[n.Provider]
 		d := Delta{Provider: n.Provider, NewWER: n.WER, NewLatMS: n.AvgLatencyMS}
@@ -45,7 +48,7 @@ func Compare(old, new Report) []Delta {
 func WorstRegression(deltas []Delta) (float64, string) {
 	worst, who := 0.0, ""
 	for _, d := range deltas {
-		if d.OnlyInOld || d.OnlyInNew {
+		if d.OnlyInOld || d.OnlyInNew || d.OldWER < 0 || d.NewWER < 0 {
 			continue
 		}
 		if d.WERChange > worst {
@@ -55,5 +58,11 @@ func WorstRegression(deltas []Delta) (float64, string) {
 	return worst, who
 }
 
-// FormatPct renders a WER as "12.3%".
-func FormatPct(w float64) string { return fmt.Sprintf("%.1f%%", w*100) }
+// FormatPct renders a WER as "12.3%", or "—" for the nothing-was-scored
+// sentinel (-1).
+func FormatPct(w float64) string {
+	if w < 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f%%", w*100)
+}

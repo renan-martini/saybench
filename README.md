@@ -7,8 +7,8 @@ Every STT vendor publishes benchmarks showing they're the fastest and most accur
 ```
 $ saybench stt -providers deepgram,openai -manifest golden/manifest.jsonl -report today.json
 
-PROVIDER  CLIPS  ERRORS  WER    AVG LATENCY  P95 LATENCY
-fake      14     0       16.5%  47ms         73ms
+PROVIDER  CLIPS  ERRORS  WER    KEYTERM RECALL  AVG LATENCY  P95 LATENCY
+fake      14     0       16.5%  67.7%           47ms         73ms
 
 PROVIDER  CATEGORY        CLIPS  WER
 fake      acronyms        2      17.6%
@@ -21,6 +21,20 @@ fake      technical       2      14.3%
 ```
 
 *(Output above is a real run of the bundled offline `fake` provider — reproducible on your machine with zero API keys. Vendor tables belong in your reports, not this README.)*
+
+## The dashboard
+
+`saybench html -o dashboard.html run1.json run2.json ...` renders any set of reports into a **single self-contained HTML file** — no server, no CDN, no build step. Latest-run summary, A/B comparison between any two runs, WER trend across runs, per-category and latency charts, keyterm recall, and a worst-clips table with the exact missed terms. Commit it as a CI artifact and every PR gets a visual diff of its voice pipeline.
+
+![saybench dashboard](docs/dashboard.png)
+
+## Machine-readable everything
+
+Every command takes `-format json` and emits the full structured result to stdout. This is deliberate: benchmarks should be consumable by **coding agents, not just humans** — an LLM debugging your voice pipeline can run `saybench stt -format json`, read the per-clip breakdown, and know *which names it garbled* before a feature ships. An MCP server mode is on the roadmap.
+
+## Keyterm recall: the metric WER hides
+
+A transcript can score 95% on WER and still be useless — because the 5% it missed was the customer's name, the policy number, and the callback date. Add `"keyterms": ["Beatriz Nakamura", "four seven three nine"]` to any manifest line and saybench reports **keyterm recall** separately: of the words that matter, how many survived transcription intact — with the misses named per clip.
 
 ## Why categories, not just one number
 
@@ -75,12 +89,7 @@ Adding a provider is one file implementing a two-method interface — see `inter
 
 ## Roadmap
 
-- [ ] TTS benchmarking: time-to-first-audio per vendor
-- [ ] LLM benchmarking: streamed time-to-first-token for the conversation loop
-- [ ] Streaming STT latency (interim/final timing), reported separately from batch
-- [ ] Pipecat adapter: benchmark the services in your Pipecat pipeline directly
-- [ ] Cost columns: $/hour of audio per provider
-- [ ] More providers (PRs welcome — the interface is deliberately tiny)
+The detailed plan lives in [ROADMAP.md](ROADMAP.md). Headlines: streaming STT latency, TTS time-to-first-audio, LLM time-to-first-token against any OpenAI-compatible endpoint, an MCP server mode so coding agents can run benchmarks natively, a Pipecat adapter, and cost-per-hour columns.
 
 ## Design principles
 

@@ -5,21 +5,25 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
 
+	"github.com/renan-martini/saybench/internal/dashboard"
 	"github.com/renan-martini/saybench/internal/manifest"
 	"github.com/renan-martini/saybench/internal/provider"
 	"github.com/renan-martini/saybench/internal/report"
 	"github.com/renan-martini/saybench/internal/runner"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -35,6 +39,8 @@ func main() {
 		err = cmdSTT(ctx, os.Args[2:])
 	case "compare":
 		err = cmdCompare(os.Args[2:])
+	case "html":
+		err = cmdHTML(os.Args[2:])
 	case "version":
 		fmt.Println("saybench", version)
 	case "help", "-h", "--help":
@@ -56,6 +62,7 @@ func usage() {
 Usage:
   saybench stt     -providers fake,deepgram,openai [-manifest golden/manifest.jsonl] [-report out.json]
   saybench compare old.json new.json [-max-wer-regression 2.0]
+  saybench html    -o dashboard.html run1.json run2.json ...
   saybench version
 
 Providers read API keys from the environment only:
@@ -70,6 +77,7 @@ func cmdSTT(ctx context.Context, args []string) error {
 	providers := fs.String("providers", "fake", "comma-separated providers: fake, deepgram, openai")
 	manifestPath := fs.String("manifest", "golden/manifest.jsonl", "path to a JSONL corpus manifest")
 	reportPath := fs.String("report", "", "write the full JSON report here")
+	format := fs.String("format", "table", "stdout format: table or json (json is the full report, machine- and LLM-readable)")
 	workers := fs.Int("workers", 4, "concurrent transcriptions")
 	timeout := fs.Duration("timeout", 60*time.Second, "per-clip timeout")
 	if err := fs.Parse(args); err != nil {
@@ -78,6 +86,9 @@ func cmdSTT(ctx context.Context, args []string) error {
 
 	items, err := manifest.Load(*manifestPath)
 	if err != nil {
+		if os.IsNotExist(err) && *manifestPath == "golden/manifest.jsonl" {
+			return fmt.Errorf("default corpus not found (run from a clone of the repo, or point -manifest at your own JSONL corpus): %w", err)
+		}
 		return err
 	}
 	refs := make(map[string]string, len(items))
@@ -100,8 +111,22 @@ func cmdSTT(ctx context.Context, args []string) error {
 			}
 		},
 	})
+	if ctx.Err() != nil {
+		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
+	}
 	rep := report.Build(version, *manifestPath, results)
-	printSummary(rep)
+	switch *format {
+	case "table":
+		printSummary(rep)
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown -format %q (table or json)", *format)
+	}
 
 	if *reportPath != "" {
 		if err := rep.Save(*reportPath); err != nil {
@@ -114,10 +139,10 @@ func cmdSTT(ctx context.Context, args []string) error {
 
 func printSummary(r report.Report) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tAVG LATENCY\tP95 LATENCY")
+	fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tAVG LATENCY\tP95 LATENCY")
 	for _, s := range r.Summaries {
-		fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%dms\t%dms\n",
-			s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), s.AvgLatencyMS, s.P95LatencyMS)
+		fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%dms\t%dms\n",
+			s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), report.FormatPct(s.KeytermRecall), s.AvgLatencyMS, s.P95LatencyMS)
 	}
 	w.Flush()
 
@@ -130,10 +155,54 @@ func printSummary(r report.Report) {
 	w.Flush()
 }
 
+func cmdHTML(args []string) error {
+	fs := flag.NewFlagSet("html", flag.ExitOnError)
+	out := fs.String("o", "dashboard.html", "output HTML file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	// Accept flags and file arguments in any order.
+	var files []string
+	rest := fs.Args()
+	for len(rest) > 0 {
+		if strings.HasPrefix(rest[0], "-") {
+			if err := fs.Parse(rest); err != nil {
+				return err
+			}
+			rest = fs.Args()
+			continue
+		}
+		files = append(files, rest[0])
+		rest = rest[1:]
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("usage: saybench html -o dashboard.html run1.json [run2.json ...] (oldest first)")
+	}
+	runs := make([]report.Report, 0, len(files))
+	for _, f := range files {
+		r, err := report.LoadFile(f)
+		if err != nil {
+			return err
+		}
+		runs = append(runs, r)
+	}
+	f, err := os.Create(*out)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := dashboard.Render(f, runs, version); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "dashboard written to %s (%d runs)\n", *out, len(runs))
+	return nil
+}
+
 func cmdCompare(args []string) error {
 	fs := flag.NewFlagSet("compare", flag.ExitOnError)
 	maxRegression := fs.Float64("max-wer-regression", -1,
 		"fail (exit 1) if any provider's WER worsens by more than this many percentage points")
+	format := fs.String("format", "table", "stdout format: table or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -159,7 +228,24 @@ func cmdCompare(args []string) error {
 	}
 	deltas := report.Compare(old, new_)
 
+	if *format == "json" {
+		worst, who := report.WorstRegression(deltas)
+		out := struct {
+			Deltas         []report.Delta `json:"deltas"`
+			WorstWERChange float64        `json:"worst_wer_change_pp"`
+			WorstProvider  string         `json:"worst_provider,omitempty"`
+		}{deltas, worst, who}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(out); err != nil {
+			return err
+		}
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	if *format == "json" {
+		w = tabwriter.NewWriter(io.Discard, 2, 4, 2, ' ', 0)
+	}
 	fmt.Fprintln(w, "PROVIDER\tWER OLD\tWER NEW\tCHANGE\tLATENCY OLD\tLATENCY NEW")
 	for _, d := range deltas {
 		switch {

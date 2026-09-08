@@ -41,3 +41,9 @@ func TestFromSpecs(t *testing.T) {
 		t.Fatal("expected error for empty spec")
 	}
 }
+
+func TestFromSpecsRejectsDuplicates(t *testing.T) {
+	if _, err := FromSpecs("fake,fake", nil); err == nil {
+		t.Fatal("expected error for duplicate provider spec")
+	}
+}

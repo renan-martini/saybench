@@ -62,3 +62,22 @@ func TestCompareAndRegression(t *testing.T) {
 		t.Fatalf("worst regression = %v by %q, want ~10 by p", worst, who)
 	}
 }
+
+func TestAllErrorsNeverReportsPerfectWER(t *testing.T) {
+	r := Build("t", "m", []ItemResult{
+		{Provider: "p", Error: "boom"},
+		{Provider: "p", Error: "boom"},
+	})
+	if r.Summaries[0].WER >= 0 {
+		t.Fatalf("all-error summary WER = %v, want -1 sentinel", r.Summaries[0].WER)
+	}
+	if got := FormatPct(r.Summaries[0].WER); got != "—" {
+		t.Fatalf("FormatPct(-1) = %q, want em dash", got)
+	}
+	// And the regression gate must not treat unscored as a regression.
+	ok := Build("t", "m", []ItemResult{{Provider: "p", WER: 0.1, Sub: 1, RefWords: 10}})
+	worst, _ := WorstRegression(Compare(ok, r))
+	if worst != 0 {
+		t.Fatalf("unscored run counted as regression: %v", worst)
+	}
+}

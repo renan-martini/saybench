@@ -26,5 +26,7 @@ jobs:
       - name: end-to-end smoke (offline fake provider)
         run: |
           ./saybench stt -providers fake -manifest golden/manifest.jsonl -report base.json
-          ./saybench stt -providers fake -manifest golden/manifest.jsonl -report again.json
+          ./saybench stt -providers fake -manifest golden/manifest.jsonl -report again.json -format json | grep -q '"keyterm_recall"'
           ./saybench compare base.json again.json -max-wer-regression 0.0
+          ./saybench html -o dash.html base.json again.json
+          grep -q "saybench dashboard" dash.html
