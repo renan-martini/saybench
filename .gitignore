@@ -1,0 +1,6 @@
+/saybench
+*.json
+!golden/manifest.jsonl
+/dist/
+*.aiff
+.DS_Store

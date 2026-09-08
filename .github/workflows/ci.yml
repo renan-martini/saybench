@@ -1,0 +1,30 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - name: vet
+        run: go vet ./...
+      - name: test (race)
+        run: go test -race ./...
+      - name: build
+        run: go build ./cmd/saybench
+      - name: end-to-end smoke (offline fake provider)
+        run: |
+          ./saybench stt -providers fake -manifest golden/manifest.jsonl -report base.json
+          ./saybench stt -providers fake -manifest golden/manifest.jsonl -report again.json
+          ./saybench compare base.json again.json -max-wer-regression 0.0

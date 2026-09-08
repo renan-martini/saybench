@@ -1,0 +1,64 @@
+package report
+
+import (
+	"path/filepath"
+	"testing"
+)
+
+func items() []ItemResult {
+	return []ItemResult{
+		{Provider: "fake", Category: "names", WER: 0.2, Sub: 1, RefWords: 5, LatencyMS: 30},
+		{Provider: "fake", Category: "numbers", WER: 0.0, RefWords: 10, LatencyMS: 50},
+		{Provider: "fake", Category: "numbers", Error: "boom"},
+		{Provider: "real", Category: "names", WER: 0.5, Sub: 1, Del: 1, RefWords: 4, LatencyMS: 200},
+	}
+}
+
+func TestBuildAggregates(t *testing.T) {
+	r := Build("test", "m.jsonl", items())
+	if len(r.Summaries) != 2 {
+		t.Fatalf("got %d summaries, want 2", len(r.Summaries))
+	}
+	// fake: 1 edit over 15 ref words, one error, latencies 30+50
+	f := r.Summaries[0]
+	if f.Provider != "fake" || f.Items != 3 || f.Errors != 1 {
+		t.Fatalf("fake summary wrong: %+v", f)
+	}
+	if want := 1.0 / 15; f.WER != want {
+		t.Fatalf("fake corpus WER = %v, want %v", f.WER, want)
+	}
+	if f.AvgLatencyMS != 40 {
+		t.Fatalf("avg latency = %d, want 40", f.AvgLatencyMS)
+	}
+	if got := len(r.Categories); got != 3 {
+		t.Fatalf("got %d category rows, want 3", got)
+	}
+}
+
+func TestSaveLoadRoundTrip(t *testing.T) {
+	r := Build("test", "m.jsonl", items())
+	p := filepath.Join(t.TempDir(), "r.json")
+	if err := r.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != len(r.Items) || got.Summaries[0].WER != r.Summaries[0].WER {
+		t.Fatal("round trip mismatch")
+	}
+}
+
+func TestCompareAndRegression(t *testing.T) {
+	old := Build("t", "m", []ItemResult{{Provider: "p", WER: 0.10, Sub: 1, RefWords: 10, LatencyMS: 10}})
+	new_ := Build("t", "m", []ItemResult{{Provider: "p", WER: 0.20, Sub: 2, RefWords: 10, LatencyMS: 10}})
+	deltas := Compare(old, new_)
+	if len(deltas) != 1 {
+		t.Fatalf("got %d deltas", len(deltas))
+	}
+	worst, who := WorstRegression(deltas)
+	if who != "p" || worst < 9.9 || worst > 10.1 {
+		t.Fatalf("worst regression = %v by %q, want ~10 by p", worst, who)
+	}
+}
