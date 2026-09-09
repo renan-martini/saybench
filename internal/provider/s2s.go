@@ -101,6 +101,33 @@ func S2SFromSpecsOpts(specs string, refs map[string]string, o S2SOpts) ([]S2SPro
 			p.bargeIn = o.BargeIn
 			p.bargeClip = o.BargeClip
 			out = append(out, p)
+		case "gemini":
+			key := os.Getenv("GEMINI_API_KEY")
+			if key == "" {
+				key = os.Getenv("GOOGLE_API_KEY")
+			}
+			if key == "" {
+				return nil, fmt.Errorf("gemini s2s needs GEMINI_API_KEY (or GOOGLE_API_KEY)")
+			}
+			if o.TurnEnding != "server_vad" {
+				return nil, fmt.Errorf("gemini's turn handling is automatic VAD — the Live API has no deterministic commit; run with -turn-ending server_vad")
+			}
+			if o.BargeIn {
+				return nil, fmt.Errorf("-barge-in is not implemented for the gemini adapter yet")
+			}
+			model := os.Getenv("SAYBENCH_GEMINI_S2S_MODEL")
+			if model == "" {
+				model = "gemini-live-2.5-flash"
+			}
+			base := os.Getenv("SAYBENCH_GEMINI_S2S_URL")
+			if base == "" {
+				base = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+			}
+			p := newGeminiS2S("gemini:"+model, base, key, model)
+			if echo {
+				p.instructions = echoInstructions
+			}
+			out = append(out, p)
 		case "custom":
 			base := os.Getenv("SAYBENCH_S2S_URL")
 			if base == "" {
@@ -116,7 +143,7 @@ func S2SFromSpecsOpts(specs string, refs map[string]string, o S2SOpts) ([]S2SPro
 			p.bargeClip = o.BargeClip
 			out = append(out, p)
 		default:
-			return nil, fmt.Errorf("unknown s2s provider %q (known: fake-s2s, openai, custom)", s)
+			return nil, fmt.Errorf("unknown s2s provider %q (known: fake-s2s, openai, gemini, custom)", s)
 		}
 	}
 	if len(out) == 0 {
