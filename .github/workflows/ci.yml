@@ -48,6 +48,11 @@ jobs:
           ./saybench show tts.json | grep -q "TTFA"
           ./saybench stt -providers fake -normalize digits -manifest golden/manifest.jsonl -report norm.json
           ./saybench compare base.json norm.json 2>&1 | grep -q "different scoring normalization"
+          ./saybench stt -providers fake -judge fake-llm -manifest golden/manifest.jsonl -report judged.json
+          ./saybench show -format json judged.json | grep -q '"judge_scored": true'
+          ./saybench compare base.json judged.json 2>&1 | grep -q "different judges"
+          ./saybench s2s -providers fake-s2s -barge-in -manifest golden/manifest.jsonl -report barge.json | grep -q "BARGE-IN STOP"
+          ./saybench compare s2s.json barge.json 2>&1 | grep -q "barge-in"
           printf '%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_stt","arguments":{"providers":"fake","manifest":"golden/manifest.jsonl"}}}' | ./saybench mcp | grep -q '"serverInfo"' 
           ./saybench show llm.json | grep -q "TTFT"
           ./saybench html -o llmdash.html llm.json

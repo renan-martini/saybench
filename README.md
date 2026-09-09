@@ -128,9 +128,9 @@ PROVIDER  TURNS  ERRORS  V2V FIRST AUDIO AVG  V2V P95  RESPONSE DONE AVG  SPEECH
 fake-s2s  14     0       503ms                690ms    1917ms             1217ms
 ```
 
-- **Deterministic turn ending** (`turn_detection: null` + explicit commit + `response.create`), same doctrine as streaming: V2V is measured from a known instant, not the server VAD's guess. Server-VAD posture is a separate follow-up dimension, never blended in.
+- **Deterministic turn ending by default** (`turn_detection: null` + explicit commit + `response.create`), same doctrine as streaming: V2V is measured from a known instant, not the server VAD's guess. `-turn-ending server_vad` opts into the production posture instead — the model detects end-of-speech itself, a 1.5s silence tail lets its VAD fire, and the measured V2V then *includes* VAD hangover, which is the point. The posture is recorded on the report and `compare` warns when the two mix.
 - **One fresh connection per clip, deliberately** — the opposite of the LLM-WS rule, for a reason: realtime sessions are stateful conversations, and separate clips must be separate conversations.
-- **Agnostic by construction:** `openai` (Realtime speech-to-speech, default `gpt-realtime`, overridable) works today; **`custom` points the same OpenAI-Realtime dialect at your own endpoint** via `SAYBENCH_S2S_URL` — emerging S2S vendors clone that dialect the way everyone cloned chat completions. Anything that doesn't is a one-file adapter behind the two-method `S2SProvider` interface (Gemini Live is the named next one).
+- **Agnostic by construction:** `openai` (Realtime speech-to-speech, default `gpt-realtime`, overridable) works today; **`custom` points the same OpenAI-Realtime dialect at your own endpoint** via `SAYBENCH_S2S_URL` — emerging S2S vendors clone that dialect the way everyone cloned chat completions. Anything that doesn't is a one-file adapter behind the two-method `S2SProvider` interface — and **`gemini` speaks Google's Live API** (BidiGenerateContent over WS) natively: `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), default model `gemini-live-2.5-flash` (`SAYBENCH_GEMINI_S2S_MODEL` overrides — Google renames models often, and the endpoint's own error is surfaced when that happens). The Live API's turn handling is automatic-VAD only, so `gemini` refuses `-turn-ending commit` with instructions rather than silently measuring something else. Protocol-tested against a local mock; awaiting live verification, the same ladder every adapter here climbed.
 - **Phase 2 — comprehension, via echo elicitation (`-score echo`):** an S2S model never tells you what it heard, only how it replied — so the echo task instructs it to *repeat back verbatim what the caller said*, and the model's own reply transcript is scored with the same WER + keyterm machinery as everything else. The golden set's failure-mode categories become an S2S comprehension benchmark. Echo and conversational are recorded **conditions**: the report carries `s2s_scoring`, `compare` warns when they mix, and unscored runs show `—`, never 0%. Two limitations stated up front: the digit-formatting artifact applies here exactly as in batch STT (a perfect hearing may echo `4739028` against a spelled-out reference), and the scored text is the model's *own transcript of its own speech* — the metric scores the whole loop (hear → speak → self-transcribe), which is what a caller experiences anyway.
 
 Real results, September 2026 — the golden set as live conversational turns against `gpt-realtime`:
@@ -152,6 +152,19 @@ openai:gpt-realtime  14     0       27.0%     77.4%           638ms             
 Reading that 27% honestly, the per-clip transcripts decompose it into three classes. First, the **predicted formatting artifact** ("4 7 3 9 0 2 8" echoed against a spelled-out reference — heard perfectly, scored as error). Second — the finding only this task could surface — **the model can't stop being an assistant**: told to echo "wait, before you do that, check whether the previous order shipped," it replied *"Sure thing. Let me check whether the previous order ever shipped"* — it did the thing instead of repeating it. Audio-mode instruction non-compliance is a real deployment risk, and it's invisible to every latency benchmark. Third, **where it complied, hearing was flawless**: 0.0% on the names clip, the insurance acronyms, and the technical jargon. The keyterm column carries the punchline: as a *listener*, `gpt-realtime` at **77.4% keyterm recall beats `gpt-4o-mini-transcribe`'s 74.2%** on the same golden set — while `nova-3` still leads at 93.5%. Treat the echo WER as an upper bound on mishearing, not a measurement of it — the loop includes formatting, compliance, and self-transcription, and that composite is what a caller experiences.
 
 The `openai` S2S adapter worked on first live contact (14/14) in both phases — the mock-server tests carry both GA and beta event names, because the Realtime rename has bitten this codebase before.
+
+### Barge-in: how fast does it shut up?
+
+In a real call the user *will* talk over the agent, and what happens next decides whether the product feels conversational or maddening. `saybench s2s -barge-in` measures it: the reply's first audio arrives, a fixed 700ms passes, then a clean-room interrupt clip ("Wait, wait — hold on, stop for a second," `golden/barge/interrupt.wav`) feeds at real-time pace over the model's own speech. The metric is **barge-in stop time**: first interrupting audio byte sent → last output-audio delta received — how long the model kept talking after being interrupted.
+
+```
+$ saybench s2s -providers fake-s2s -barge-in
+
+PROVIDER  TURNS  ERRORS  BARGE-IN STOP AVG  STOP P95  V2V FIRST AUDIO AVG  SPEECH OUT AVG
+fake-s2s  14     0       360ms              490ms     503ms                1217ms
+```
+
+`-barge-in` implies `-turn-ending server_vad` (the model must be able to *detect* the interruption) and refuses to combine with `-score echo` — interrupting a repeat-back task measures neither thing well. Barge-in runs are recorded as their own condition on the report, and `compare` warns when a barge-in run meets a normal one: they are different experiments entirely.
 
 ## TTS mode: the last leg of the pipeline
 
@@ -266,11 +279,12 @@ Adding a provider is one file implementing a two-method interface — see `inter
 - **WER is corpus-level** (total edits ÷ total reference words), with per-clip substitution/deletion/insertion breakdowns in the JSON report — a score you can debug, not just rank by.
 - **Both sides are normalized** (case, punctuation) before scoring, so vendor formatting choices don't count as errors.
 - **Digit formatting is a choice, not a surprise**: `-normalize digits` canonicalizes digit strings against spelled-out digits ("4739028" ≡ "four seven three nine zero two eight") before scoring — opt-in, recorded on the report, warned about in `compare` when runs mix normalizations. Full number semantics ("$247.63" vs "two hundred forty seven dollars") stays out of scope, and the flag's docs say so. Rescoring this README's own published runs with it: `gpt-4o-mini-transcribe` drops from 19.0% to **12.2%** (a third of its "errors" were formatting), the S2S echo run from 27.0% to 20.7%, and `nova-3` from 3.8% to 3.0%.
+- **Judge scoring is opt-in and additive, never a replacement**: `-judge <llm-target>` (on `stt`, `stream`, and `s2s -score echo`) has an LLM rate each transcript against its reference on a fixed rubric — "does the meaning survive?", one number 0–100 — and a JUDGE column lands beside WER, which stays exactly where it was. One LLM call per scored item, so it costs what your judge costs. The judge target is recorded on the report and `compare` warns when runs used different judges: judge scores are judge-relative. `fake-llm` answers the rubric deterministically, so the whole path runs offline in CI.
 - **Latency here is batch-API round-trip** including upload — comparable across providers, but *not* the same as streaming time-to-first-token. Streaming latency is on the roadmap and will be reported separately, never blended.
 
 ## Roadmap
 
-The detailed plan lives in [ROADMAP.md](ROADMAP.md). Headlines: LLM time-to-first-token against any OpenAI-compatible endpoint, **speech-to-speech model benchmarking** (voice-to-voice latency, then comprehension scoring via echo elicitation), TTS time-to-first-audio, an MCP server mode so coding agents can run benchmarks natively, a Pipecat adapter, and cost-per-hour columns.
+Everything on the original roadmap has shipped — batch and streaming STT, LLM TTFT, S2S (voice-to-voice, echo comprehension, barge-in), TTS, judge scoring, cost columns, the MCP server, and the Pipecat guide. [ROADMAP.md](ROADMAP.md) keeps the shipped log with what each version added and why. What remains open-ended is providers: every adapter interface here is two methods, and PRs are welcome.
 
 ## Design principles
 

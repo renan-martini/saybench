@@ -47,6 +47,15 @@ measure it. Order is intent, not promise.
   connections, recorded in the report, with compare warning on
   warm-vs-cold.
 
+- **v1.1** — the deferred items, un-deferred: **`-judge`** (LLM-rated
+  semantic preservation beside literal WER on stt/stream/s2s-echo — fixed
+  rubric, judge recorded as a compare-warned condition, fake-llm answers it
+  offline) · **s2s `-barge-in`** (interrupt the reply mid-speech with a
+  clean-room clip, measure how long the model keeps talking; implies
+  server_vad; its own compare-warned condition) · **`gemini` S2S adapter**
+  (Google Live API / BidiGenerateContent dialect: automatic-VAD turn
+  handling, refuses `-turn-ending commit`; protocol-tested against a local
+  mock, awaiting live verification).
 - **v1.0** — the close-out: **TTS mode** (time-to-first-audio, streamed
   24 kHz PCM: openai, elevenlabs, custom, fake-tts) · **cost columns** from
   a user-supplied pricing table (no built-in prices, deliberately) ·
@@ -57,23 +66,6 @@ measure it. Order is intent, not promise.
   integration guide.
 
 ## Next
-
-### Judge-scored semantic quality
-Optional LLM-judge scoring beside literal WER for "meaning survived, words
-differ" — an addition, clearly labeled, never a replacement.
-
-### Barge-in latency (s2s)
-How fast the model stops when interrupted mid-response. Deferred
-deliberately: it needs mid-response interrupt choreography (feed a second
-utterance while output audio is streaming, measure output cessation), which
-is its own design, not an afternoon.
-
-### Gemini Live adapter (and other non-OpenAI-dialect S2S vendors)
-Deferred deliberately, not forgotten: the protocol moves fast and this repo
-does not ship adapters it cannot live-verify — an unverifiable adapter is
-worse than none. It is a one-file contribution behind the two-method
-`S2SProvider` interface for anyone with a key; the AssemblyAI and
-ElevenLabs adapters await live verification the same way.
 
 ### More providers everywhere
 Every provider interface in this repo is two methods. PRs welcome.

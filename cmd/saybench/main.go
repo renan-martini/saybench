@@ -26,7 +26,7 @@ import (
 	"github.com/renan-martini/saybench/internal/wer"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -273,7 +273,7 @@ func cmdStream(ctx context.Context, args []string) error {
 
 func cmdS2S(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("s2s", flag.ExitOnError)
-	providers := fs.String("providers", "fake-s2s", "comma-separated: fake-s2s, openai, custom (OpenAI-Realtime-dialect endpoint via SAYBENCH_S2S_URL)")
+	providers := fs.String("providers", "fake-s2s", "comma-separated: fake-s2s, openai, gemini (Live API — needs -turn-ending server_vad), custom (OpenAI-Realtime-dialect endpoint via SAYBENCH_S2S_URL)")
 	manifestPath := fs.String("manifest", "golden/manifest.jsonl", "path to a JSONL corpus manifest (clips are the user's turns)")
 	reportPath := fs.String("report", "", "write the full JSON report here")
 	format := fs.String("format", "table", "stdout format: table or json")
@@ -619,10 +619,10 @@ func printSummary(r report.Report) {
 			printCost(r)
 			return
 		}
-		fmt.Fprintln(w, "PROVIDER\tTURNS\tERRORS\tECHO WER\tKEYTERM RECALL\tV2V FIRST AUDIO AVG\tV2V P95\tRESPONSE DONE AVG\tSPEECH OUT AVG")
+		fmt.Fprintln(w, "PROVIDER\tTURNS\tERRORS\tECHO WER\tKEYTERM RECALL\tJUDGE\tV2V FIRST AUDIO AVG\tV2V P95\tRESPONSE DONE AVG\tSPEECH OUT AVG")
 		for _, s := range r.Summaries {
-			fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%dms\t%dms\t%dms\t%dms\n",
-				s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), report.FormatPct(s.KeytermRecall),
+			fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%s\t%dms\t%dms\t%dms\t%dms\n",
+				s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), report.FormatPct(s.KeytermRecall), report.FormatPct(s.AvgJudgeScore),
 				s.AvgV2VFirstAudioMS, s.P95V2VFirstAudioMS, s.AvgResponseDoneMS, s.AvgOutputAudioMS)
 		}
 		w.Flush()
@@ -640,10 +640,10 @@ func printSummary(r report.Report) {
 		return
 	}
 	if r.Mode == report.ModeStreaming {
-		fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tTTFP AVG\tTTFP P95\tFINAL LAG AVG\tFINAL LAG P95\tINTERIM SURVIVAL")
+		fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tJUDGE\tTTFP AVG\tTTFP P95\tFINAL LAG AVG\tFINAL LAG P95\tINTERIM SURVIVAL")
 		for _, s := range r.Summaries {
-			fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%dms\t%dms\t%dms\t%dms\t%s\n",
-				s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), report.FormatPct(s.KeytermRecall),
+			fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%s\t%dms\t%dms\t%dms\t%dms\t%s\n",
+				s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), report.FormatPct(s.KeytermRecall), report.FormatPct(s.AvgJudgeScore),
 				s.AvgTTFPartialMS, s.P95TTFPartialMS, s.AvgFinalLagMS, s.P95FinalLagMS, report.FormatPct(s.InterimWordSurvival))
 		}
 	} else {
