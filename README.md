@@ -153,6 +153,51 @@ Reading that 27% honestly, the per-clip transcripts decompose it into three clas
 
 The `openai` S2S adapter worked on first live contact (14/14) in both phases — the mock-server tests carry both GA and beta event names, because the Realtime rename has bitten this codebase before.
 
+## TTS mode: the last leg of the pipeline
+
+`saybench tts` synthesizes short voice-agent-shaped utterances (the llm golden set's user turns, or your own) and measures **time-to-first-audio-byte** — the number that gates when the caller starts hearing the reply — plus total synthesis time and audio duration (all streams are requested as 24 kHz PCM so duration is computable, never guessed):
+
+```
+$ saybench tts -providers fake-tts
+
+PROVIDER  UTTERANCES  ERRORS  TTFA AVG  TTFA P95  SYNTH TOTAL AVG  AUDIO OUT AVG
+fake-tts  8           0       140ms     198ms     533ms            3187ms
+```
+
+Providers: `openai` (`/audio/speech`), `elevenlabs` (stream endpoint), `custom` (any OpenAI-compatible `/audio/speech` via `SAYBENCH_TTS_BASE_URL`), `fake-tts` for CI. Both vendor adapters are protocol-tested against local mocks and await live verification.
+
+## Cost columns — from your pricing table, never ours
+
+Add `-pricing pricing.json` to any bench and reports gain real dollar costs: audio minutes (STT/streaming/S2S — clip durations parsed locally), input+output tokens (LLM), characters (TTS). **saybench ships no built-in prices, deliberately**: vendor pricing drifts monthly, and a benchmark that ships stale rates lies with authority. `pricing.example.json` carries illustrative values and says exactly that. Unknown providers cost 0, never a guess.
+
+## For coding agents: `saybench mcp`
+
+The whole tool is available as a **Model Context Protocol server** — stdio, zero configuration:
+
+```json
+{ "mcpServers": { "saybench": { "command": "saybench", "args": ["mcp"] } } }
+```
+
+Tools: `run_stt`, `run_llm`, `compare_reports` (returns deltas, the worst regression, and any condition warning), `read_report` (the agent-sized summary projection). This is the point of the whole `-format json` design: an LLM editing your voice pipeline can bench it, read which names it garbled, and gate its own change before shipping.
+
+## Benchmarking a Pipecat stack
+
+Pipecat pipelines configure services in Python, so there is no config file to parse — instead, map each service to its saybench equivalent and bench exactly what your pipeline runs:
+
+| Pipecat service | saybench |
+|---|---|
+| `DeepgramSTTService` | `saybench stream -providers deepgram` |
+| `OpenAISTTService` | `saybench stt -providers openai` |
+| `AssemblyAISTTService` | `saybench stream -providers assemblyai` |
+| `OpenAILLMService` | `saybench llm -targets gpt-4o-mini` (or your model) |
+| any OpenAI-compatible LLM (OpenRouter, Groq, vLLM…) | `saybench llm -targets openrouter:<m>` / `groq:<m>` / `custom:<m>` |
+| `OpenAIRealtimeBetaLLMService` (speech-to-speech) | `saybench s2s -providers openai` |
+| `ElevenLabsTTSService` | `saybench tts -providers elevenlabs` |
+| `OpenAITTSService` | `saybench tts -providers openai` |
+| `CartesiaTTSService` and others | one-file adapter, PRs welcome — see CONTRIBUTING.md |
+
+Use your own recorded call audio as the corpus (a manifest is one JSONL line per clip), wire `compare -max-wer-regression` into CI, and every pipeline change gets a latency-and-accuracy diff before it ships.
+
 ## The dashboard
 
 `saybench html -o dashboard.html run1.json run2.json ...` renders any set of reports into a **single self-contained HTML file** — no server, no CDN, no build step. Latest-run summary, A/B comparison between any two runs, WER trend across runs, per-category and latency charts, keyterm recall, and a worst-clips table with the exact missed terms. Commit it as a CI artifact and every PR gets a visual diff of its voice pipeline.
@@ -220,6 +265,7 @@ Adding a provider is one file implementing a two-method interface — see `inter
 
 - **WER is corpus-level** (total edits ÷ total reference words), with per-clip substitution/deletion/insertion breakdowns in the JSON report — a score you can debug, not just rank by.
 - **Both sides are normalized** (case, punctuation) before scoring, so vendor formatting choices don't count as errors.
+- **Digit formatting is a choice, not a surprise**: `-normalize digits` canonicalizes digit strings against spelled-out digits ("4739028" ≡ "four seven three nine zero two eight") before scoring — opt-in, recorded on the report, warned about in `compare` when runs mix normalizations. Full number semantics ("$247.63" vs "two hundred forty seven dollars") stays out of scope, and the flag's docs say so.
 - **Latency here is batch-API round-trip** including upload — comparable across providers, but *not* the same as streaming time-to-first-token. Streaming latency is on the roadmap and will be reported separately, never blended.
 
 ## Roadmap

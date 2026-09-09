@@ -44,6 +44,11 @@ jobs:
           ./saybench s2s -providers fake-s2s -score echo -manifest golden/manifest.jsonl -report s2secho.json
           ./saybench show s2secho.json | grep -q "ECHO WER"
           ./saybench compare s2s.json s2secho.json 2>&1 | grep -q "tasks differ"
+          ./saybench tts -providers fake-tts -texts llm/golden.jsonl -report tts.json
+          ./saybench show tts.json | grep -q "TTFA"
+          ./saybench stt -providers fake -normalize digits -manifest golden/manifest.jsonl -report norm.json
+          ./saybench compare base.json norm.json 2>&1 | grep -q "different scoring normalization"
+          printf '%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_stt","arguments":{"providers":"fake","manifest":"golden/manifest.jsonl"}}}' | ./saybench mcp | grep -q '"serverInfo"' 
           ./saybench show llm.json | grep -q "TTFT"
           ./saybench html -o llmdash.html llm.json
           grep -q "saybench dashboard" llmdash.html

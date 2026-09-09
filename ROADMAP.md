@@ -47,39 +47,33 @@ measure it. Order is intent, not promise.
   connections, recorded in the report, with compare warning on
   warm-vs-cold.
 
+- **v1.0** — the close-out: **TTS mode** (time-to-first-audio, streamed
+  24 kHz PCM: openai, elevenlabs, custom, fake-tts) · **cost columns** from
+  a user-supplied pricing table (no built-in prices, deliberately) ·
+  **`-normalize digits`** (the formatting artifact becomes a recorded,
+  compare-warned choice) · **s2s `-turn-ending server_vad`** (production
+  posture, VAD hangover measured, silence tail appended) · **`saybench
+  mcp`** (the whole tool as an MCP server for coding agents) · a Pipecat
+  integration guide.
+
 ## Next
 
-### S2S follow-ups
-Server-VAD posture as a labeled dimension, barge-in latency, and a Gemini
-Live adapter. (Phase 2 — echo-elicitation comprehension scoring — shipped
-in v0.9.)
+### Judge-scored semantic quality
+Optional LLM-judge scoring beside literal WER for "meaning survived, words
+differ" — an addition, clearly labeled, never a replacement.
 
-### 3. TTS time-to-first-audio
-The other half of response latency: how long from send to the first audible
-byte, per vendor and voice. TTFA is the number a caller hears.
+### Barge-in latency (s2s)
+How fast the model stops when interrupted mid-response. Deferred
+deliberately: it needs mid-response interrupt choreography (feed a second
+utterance while output audio is streaming, measure output cessation), which
+is its own design, not an afternoon.
 
-### 4. MCP server mode (`saybench mcp`)
-Benchmarks should be usable by coding agents, not just humans. An MCP server
-exposing `run_stt_bench`, `compare_reports`, and `read_report` lets an LLM
-assistant benchmark the pipeline it is editing — before a feature ships, as
-part of its own loop. The `-format json` output is the foundation; this makes
-it native.
+### Gemini Live adapter (and other non-OpenAI-dialect S2S vendors)
+Deferred deliberately, not forgotten: the protocol moves fast and this repo
+does not ship adapters it cannot live-verify — an unverifiable adapter is
+worse than none. It is a one-file contribution behind the two-method
+`S2SProvider` interface for anyone with a key; the AssemblyAI and
+ElevenLabs adapters await live verification the same way.
 
-### 5. Pipecat adapter
-Point saybench at a Pipecat pipeline's configured STT/TTS/LLM services and
-bench exactly what the pipeline runs, not a hand-maintained parallel config.
-
-### 6. Cost columns
-$/hour of audio per provider next to WER and latency, from a maintained
-pricing table — model choices are three-axis trade-offs; the report should
-show all three axes.
-
-### 7. Scoring depth
-- Text-normalization options (number formats: "401" vs "four oh one" —
-  today's literal scoring counts formatting as error; make that a choice).
-- Optional judge-based semantic scoring beside literal WER, for "meaning
-  survived, words differ" cases. Never a replacement for WER — an addition,
-  clearly labeled.
-
-### 8. More providers
-The interface is two methods. PRs welcome — see CONTRIBUTING.md.
+### More providers everywhere
+Every provider interface in this repo is two methods. PRs welcome.

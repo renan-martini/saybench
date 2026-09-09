@@ -26,7 +26,7 @@ import (
 	"github.com/renan-martini/saybench/internal/wer"
 )
 
-const version = "0.9.0"
+const version = "1.0.0"
 
 func main() {
 	if len(os.Args) < 2 {
