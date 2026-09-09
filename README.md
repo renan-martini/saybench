@@ -90,7 +90,15 @@ fake-llm  8        0       208ms     273ms     533ms           42.6
 
 **Warm by default:** every target gets one unmeasured throwaway request before the bench (`-warmup=false` to study cold starts instead) — the first live run showed cold TLS setup is a ~3× TTFT effect, and production voice agents run warm. Reports record which posture was measured, and `compare` warns when a warm run meets a cold one.
 
-**Transport is a dimension:** `openai-ws:gpt-4o-mini` benches the same model over the Responses API's WebSocket mode — one persistent connection per target with prompts serialized over it, because connection reuse is the thing WS mode exists to provide (a fresh socket per prompt would erase what's being measured). Put both transports in one table: `-targets gpt-4o-mini,openai-ws:gpt-4o-mini`. The WS adapter is protocol-tested against a local mock and awaits live verification.
+**Transport is a dimension:** `openai-ws:gpt-4o-mini` benches the same model over the Responses API's WebSocket mode — one persistent connection per target with prompts serialized over it, because connection reuse is the thing WS mode exists to provide (a fresh socket per prompt would erase what's being measured). Put both transports in one table — real run, September 2026, warm connections:
+
+```
+TARGET                 PROMPTS  ERRORS  TTFT AVG  TTFT P95  COMPLETION AVG  TOK/S
+openai-ws:gpt-4o-mini  8        1       664ms     1142ms    849ms           115.6
+openai:gpt-4o-mini     8        0       595ms     1103ms    762ms           109.9
+```
+
+**The honest verdict: with warm connections, WS mode buys nothing at voice-turn sizes** — SSE and WS land within ~70ms of each other (single 8-prompt run; treat as directional). The louder finding is what warmup did: the same SSE target measured **1109ms avg cold vs 595ms warm** — the transport you hold matters less than *that you hold it*. WS mode's documented wins are elsewhere (multiplexing, tool-call-heavy agentic loops), not raw single-turn TTFT. The one WS error in the table was the server cleanly reaping the persistent connection between prompts; the adapter now redials and resends once when that happens before any output (a production behavior, test-locked).
 
 Targets are `[provider:]model` against **any OpenAI-compatible endpoint** — `openai` (default), `openrouter`, `groq`, or `custom` via `SAYBENCH_LLM_BASE_URL` (vLLM, Ollama, self-hosted — no code changes):
 

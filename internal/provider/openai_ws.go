@@ -65,8 +65,22 @@ func (o *openAIResponsesWS) dial(ctx context.Context) error {
 func (o *openAIResponsesWS) Complete(ctx context.Context, p ChatPrompt) (LLMResult, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	res, retriable, err := o.completeOnce(ctx, p)
+	if err != nil && retriable && ctx.Err() == nil {
+		// The server closed the persistent connection cleanly before any
+		// output (idle reap between prompts, observed live). A production
+		// client redials and resends; so do we — exactly once, and the
+		// timer restarts so the measurement covers the attempt that ran.
+		res, _, err = o.completeOnce(ctx, p)
+	}
+	return res, err
+}
+
+// completeOnce runs one request. retriable reports a clean connection close
+// before any output arrived — the only case where a silent resend is safe.
+func (o *openAIResponsesWS) completeOnce(ctx context.Context, p ChatPrompt) (LLMResult, bool, error) {
 	if err := o.dial(ctx); err != nil {
-		return LLMResult{}, err
+		return LLMResult{}, false, err
 	}
 	o.nextID++
 	streamID := "sb-" + strconv.Itoa(o.nextID)
@@ -105,13 +119,13 @@ func (o *openAIResponsesWS) Complete(ctx context.Context, p ChatPrompt) (LLMResu
 		"input":             input,
 	})
 	if err != nil {
-		return LLMResult{}, err
+		return LLMResult{}, false, err
 	}
 
 	start := time.Now()
 	if err := o.conn.Write(ctx, websocket.MessageText, req); err != nil {
 		o.reset()
-		return LLMResult{}, fmt.Errorf("%s: send: %w", o.name, err)
+		return LLMResult{}, true, fmt.Errorf("%s: send: %w", o.name, err)
 	}
 
 	var res LLMResult
@@ -121,7 +135,8 @@ func (o *openAIResponsesWS) Complete(ctx context.Context, p ChatPrompt) (LLMResu
 		_, msg, err := o.conn.Read(ctx)
 		if err != nil {
 			o.reset()
-			return LLMResult{}, fmt.Errorf("%s: read: %w", o.name, err)
+			retriable := firstToken.IsZero() && websocket.CloseStatus(err) == websocket.StatusNormalClosure
+			return LLMResult{}, retriable, fmt.Errorf("%s: read: %w", o.name, err)
 		}
 		var ev struct {
 			Type     string `json:"type"`
@@ -154,15 +169,15 @@ func (o *openAIResponsesWS) Complete(ctx context.Context, p ChatPrompt) (LLMResu
 			}
 			res.OutputTokens = ev.Response.Usage.OutputTokens
 			if res.Text == "" {
-				return LLMResult{}, fmt.Errorf("%s: response completed with no content", o.name)
+				return LLMResult{}, false, fmt.Errorf("%s: response completed with no content", o.name)
 			}
-			return res, nil
+			return res, false, nil
 		case "response.failed", "response.incomplete":
 			msg := ev.Response.Error.Message
 			if msg == "" {
 				msg = ev.Type
 			}
-			return LLMResult{}, fmt.Errorf("%s: %s", o.name, msg)
+			return LLMResult{}, false, fmt.Errorf("%s: %s", o.name, msg)
 		}
 	}
 }

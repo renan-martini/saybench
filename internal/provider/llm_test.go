@@ -192,3 +192,53 @@ func TestOpenAIResponsesWSSurfacesFailure(t *testing.T) {
 		t.Fatalf("failure not surfaced: %v", err)
 	}
 }
+
+func TestOpenAIResponsesWSRetriesOnCleanClose(t *testing.T) {
+	var conns int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&conns, 1)
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		ctx := r.Context()
+		if n == 1 {
+			// Server drops the idle/stale connection cleanly after the
+			// request arrives, before any output — like the live API did.
+			c.Read(ctx)
+			c.Close(websocket.StatusNormalClosure, "")
+			return
+		}
+		defer c.CloseNow()
+		for {
+			_, msg, err := c.Read(ctx)
+			if err != nil {
+				return
+			}
+			var ev struct {
+				Type string `json:"type"`
+			}
+			json.Unmarshal(msg, &ev)
+			if ev.Type != "response.create" {
+				continue
+			}
+			c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.output_text.delta","delta":"ok then"}`))
+			c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.completed","response":{"usage":{"output_tokens":2}}}`))
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("SAYBENCH_OPENAI_WS_URL", wsURL(srv))
+	ts, _ := FromLLMSpecs("openai-ws:m")
+	res, err := ts[0].Complete(context.Background(), chat("x"))
+	if err != nil {
+		t.Fatalf("clean close before output must be retried once: %v", err)
+	}
+	if res.Text != "ok then" {
+		t.Fatalf("text = %q", res.Text)
+	}
+	if atomic.LoadInt32(&conns) != 2 {
+		t.Fatalf("conns = %d, want 2 (redial + resend)", conns)
+	}
+}
