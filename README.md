@@ -133,7 +133,16 @@ fake-s2s  14     0       503ms                690ms    1917ms             1217ms
 - **Agnostic by construction:** `openai` (Realtime speech-to-speech, default `gpt-realtime`, overridable) works today; **`custom` points the same OpenAI-Realtime dialect at your own endpoint** via `SAYBENCH_S2S_URL` — emerging S2S vendors clone that dialect the way everyone cloned chat completions. Anything that doesn't is a one-file adapter behind the two-method `S2SProvider` interface (Gemini Live is the named next one).
 - The model's own transcript of its spoken reply is captured per turn — the raw material for phase 2 (comprehension scoring via echo elicitation, see [ROADMAP.md](ROADMAP.md)) — but nothing is scored yet: phase 1 is latency, stated plainly.
 
-The `openai` S2S adapter is protocol-tested against a local mock (GA and beta event names both handled — the Realtime rename has bitten this codebase before) and awaits live verification.
+Real results, September 2026 — the golden set as live conversational turns against `gpt-realtime`:
+
+```
+PROVIDER             TURNS  ERRORS  V2V FIRST AUDIO AVG  V2V P95  RESPONSE DONE AVG  SPEECH OUT AVG
+openai:gpt-realtime  14     0       601ms                1318ms   2905ms             12410ms
+```
+
+Two findings worth the run. First, **the speech-native model out-turns the pipeline it replaces**: put this table next to the others in this README and the composed stack's floor is ~808ms *before TTS even begins* (213ms streaming-STT finalization lag + 595ms warm LLM TTFT, both our own published numbers) — while `gpt-realtime`'s **first audio lands at 601ms average**. Different runs, different modes, deliberately not one merged table — and the comparison still understates the pipeline's cost because TTS time-to-first-audio (roadmap) isn't counted yet. Second, a behavioral finding latency tables usually hide: **the model talks a lot** — 12.4s average spoken reply to one-utterance turns, up to 29s, despite "respond briefly" instructions. At audio-token prices, reply length is a cost and UX axis, which is exactly why `speech out` is a first-class column.
+
+The `openai` S2S adapter worked on first live contact (14/14) — the mock-server tests carry both GA and beta event names, because the Realtime rename has bitten this codebase before.
 
 ## The dashboard
 
