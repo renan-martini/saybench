@@ -44,6 +44,8 @@ func main() {
 		err = cmdLLM(ctx, os.Args[2:])
 	case "s2s":
 		err = cmdS2S(ctx, os.Args[2:])
+	case "tts":
+		err = cmdTTS(ctx, os.Args[2:])
 	case "compare":
 		err = cmdCompare(os.Args[2:])
 	case "html":
@@ -73,6 +75,7 @@ Usage:
   saybench stream  -providers fake-stream,deepgram,openai-realtime,assemblyai [same flags]
   saybench llm     -targets fake-llm,gpt-4o-mini,openai-ws:gpt-4o-mini,groq:<m>,openrouter:<m>,custom:<m> [-warmup=false]
   saybench s2s     -providers fake-s2s,openai,custom [-score echo] [-manifest golden/manifest.jsonl]
+  saybench tts     -providers fake-tts,openai,elevenlabs,custom [-texts llm/golden.jsonl]
   saybench compare old.json new.json [-max-wer-regression 2.0]
   saybench html    -o dashboard.html run1.json run2.json ...
   saybench show    report.json [-format json]
@@ -314,6 +317,64 @@ func cmdS2S(ctx context.Context, args []string) error {
 	return nil
 }
 
+func cmdTTS(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("tts", flag.ExitOnError)
+	providers := fs.String("providers", "fake-tts", "comma-separated: fake-tts, openai, elevenlabs, custom")
+	textsPath := fs.String("texts", "llm/golden.jsonl", "JSONL prompt manifest; each entry's user text is synthesized")
+	reportPath := fs.String("report", "", "write the full JSON report here")
+	format := fs.String("format", "table", "stdout format: table or json")
+	workers := fs.Int("workers", 4, "concurrent syntheses")
+	timeout := fs.Duration("timeout", 60*time.Second, "per-utterance timeout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	texts, err := manifest.LoadPrompts(*textsPath)
+	if err != nil {
+		if os.IsNotExist(err) && *textsPath == "llm/golden.jsonl" {
+			return fmt.Errorf("default text set not found (run from a clone of the repo, or point -texts at your own JSONL): %w", err)
+		}
+		return err
+	}
+	ps, err := provider.TTSFromSpecs(*providers)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "saybench: %d utterances × %d providers\n", len(texts), len(ps))
+	results := runner.RunTTS(ctx, ps, texts, runner.Options{
+		Workers:     *workers,
+		ItemTimeout: *timeout,
+		Progress: func(done, total int) {
+			fmt.Fprintf(os.Stderr, "\r%d/%d", done, total)
+			if done == total {
+				fmt.Fprintln(os.Stderr)
+			}
+		},
+	})
+	if ctx.Err() != nil {
+		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
+	}
+	rep := report.BuildMode(version, *textsPath, report.ModeTTS, results)
+	switch *format {
+	case "table":
+		printSummary(rep)
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown -format %q (table or json)", *format)
+	}
+	if *reportPath != "" {
+		if err := rep.Save(*reportPath); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "report written to %s\n", *reportPath)
+	}
+	return nil
+}
+
 func cmdLLM(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("llm", flag.ExitOnError)
 	targets := fs.String("targets", "fake-llm", "comma-separated [provider:]model targets")
@@ -394,6 +455,15 @@ func scoreOpts(normalize string) (wer.Opts, error) {
 
 func printSummary(r report.Report) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	if r.Mode == report.ModeTTS {
+		fmt.Fprintln(w, "PROVIDER\tUTTERANCES\tERRORS\tTTFA AVG\tTTFA P95\tSYNTH TOTAL AVG\tAUDIO OUT AVG")
+		for _, s := range r.Summaries {
+			fmt.Fprintf(w, "%s\t%d\t%d\t%dms\t%dms\t%dms\t%dms\n",
+				s.Provider, s.Items, s.Errors, s.AvgTTFAudioMS, s.P95TTFAudioMS, s.AvgCompletionMS, s.AvgOutputAudioMS)
+		}
+		w.Flush()
+		return
+	}
 	if r.Mode == report.ModeS2S {
 		fmt.Fprintln(w, "PROVIDER\tTURNS\tERRORS\tECHO WER\tKEYTERM RECALL\tV2V FIRST AUDIO AVG\tV2V P95\tRESPONSE DONE AVG\tSPEECH OUT AVG")
 		for _, s := range r.Summaries {

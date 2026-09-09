@@ -22,6 +22,7 @@ const (
 	ModeStreaming = "streaming"
 	ModeLLM       = "llm"
 	ModeS2S       = "s2s"
+	ModeTTS       = "tts"
 )
 
 // ItemResult is one (provider, clip) outcome.
@@ -50,6 +51,8 @@ type ItemResult struct {
 	TTFTMS       int    `json:"ttft_ms,omitempty"`
 	CompletionMS int    `json:"completion_ms,omitempty"`
 	OutputTokens int    `json:"output_tokens,omitempty"`
+	// TTS-mode field (CompletionMS and OutputAudioMS are shared).
+	TTFAudioMS int `json:"ttf_audio_ms,omitempty"`
 	// S2S-mode fields: the turn-taking numbers.
 	V2VFirstAudioMS int `json:"v2v_first_audio_ms,omitempty"`
 	ResponseDoneMS  int `json:"response_done_ms,omitempty"`
@@ -89,6 +92,9 @@ type Summary struct {
 	P95TTFTMS       int64   `json:"p95_ttft_ms,omitempty"`
 	AvgCompletionMS int64   `json:"avg_completion_ms,omitempty"`
 	AvgTokensPerSec float64 `json:"avg_tokens_per_sec,omitempty"`
+	// TTS-mode aggregates.
+	AvgTTFAudioMS int64 `json:"avg_ttf_audio_ms,omitempty"`
+	P95TTFAudioMS int64 `json:"p95_ttf_audio_ms,omitempty"`
 	// S2S-mode aggregates.
 	AvgV2VFirstAudioMS int64 `json:"avg_v2v_first_audio_ms,omitempty"`
 	P95V2VFirstAudioMS int64 `json:"p95_v2v_first_audio_ms,omitempty"`
@@ -144,6 +150,7 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 		ttfts, completions    []int64
 		tokRates              []float64
 		v2vs, dones, outAudio []int64
+		ttfas, ttsTotals      []int64
 	}
 	byProvider := map[string]*agg{}
 	type catKey struct{ p, c string }
@@ -188,6 +195,11 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 			if mode == ModeS2S {
 				x.v2vs = append(x.v2vs, int64(it.V2VFirstAudioMS))
 				x.dones = append(x.dones, int64(it.ResponseDoneMS))
+				x.outAudio = append(x.outAudio, int64(it.OutputAudioMS))
+			}
+			if mode == ModeTTS {
+				x.ttfas = append(x.ttfas, int64(it.TTFAudioMS))
+				x.ttsTotals = append(x.ttsTotals, int64(it.CompletionMS))
 				x.outAudio = append(x.outAudio, int64(it.OutputAudioMS))
 			}
 		}
@@ -240,12 +252,17 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 			s.AvgResponseDoneMS, _ = avgP95(a.dones)
 			s.AvgOutputAudioMS, _ = avgP95(a.outAudio)
 		}
+		if mode == ModeTTS {
+			s.AvgTTFAudioMS, s.P95TTFAudioMS = avgP95(a.ttfas)
+			s.AvgCompletionMS, _ = avgP95(a.ttsTotals)
+			s.AvgOutputAudioMS, _ = avgP95(a.outAudio)
+		}
 		summaries = append(summaries, s)
 	}
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Provider < summaries[j].Provider })
 
 	var cats []CategorySummary
-	if mode == ModeLLM || mode == ModeS2S {
+	if mode == ModeLLM || mode == ModeS2S || mode == ModeTTS {
 		byCat = nil // per-category WER does not exist here; item rows keep categories
 	}
 	for k, a := range byCat {

@@ -246,3 +246,21 @@ func TestS2SScoringConditionAndSentinel(t *testing.T) {
 		t.Fatalf("same condition must not warn: %q", note)
 	}
 }
+
+func TestTTSAggregation(t *testing.T) {
+	items := []ItemResult{
+		{Provider: "openai:tts", Prompt: "greeting", TTFAudioMS: 200, CompletionMS: 900, OutputAudioMS: 2000},
+		{Provider: "openai:tts", Prompt: "faq", TTFAudioMS: 400, CompletionMS: 1100, OutputAudioMS: 3000},
+	}
+	r := BuildMode("t", "llm/golden.jsonl", ModeTTS, items)
+	if r.Mode != ModeTTS {
+		t.Fatalf("mode = %q", r.Mode)
+	}
+	s := r.Summaries[0]
+	if s.AvgTTFAudioMS != 300 || s.P95TTFAudioMS != 400 || s.AvgCompletionMS != 1000 || s.AvgOutputAudioMS != 2500 {
+		t.Fatalf("tts agg wrong: %+v", s)
+	}
+	if len(r.Categories) != 0 {
+		t.Fatal("tts mode must omit category summaries")
+	}
+}

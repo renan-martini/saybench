@@ -312,6 +312,64 @@ func runOneS2S(ctx context.Context, p provider.S2SProvider, it manifest.Item, op
 	return res
 }
 
+// RunTTS benchmarks TTS providers over a set of short texts.
+func RunTTS(ctx context.Context, providers []provider.TTSProvider, texts []manifest.Prompt, opts Options) []report.ItemResult {
+	if opts.Workers <= 0 {
+		opts.Workers = 4
+	}
+	if opts.ItemTimeout <= 0 {
+		opts.ItemTimeout = 60 * time.Second
+	}
+	type job struct {
+		p   provider.TTSProvider
+		t   manifest.Prompt
+		idx int
+	}
+	jobs := make([]job, 0, len(providers)*len(texts))
+	for _, p := range providers {
+		for _, t := range texts {
+			jobs = append(jobs, job{p: p, t: t, idx: len(jobs)})
+		}
+	}
+	results := make([]report.ItemResult, len(jobs))
+	ch := make(chan job)
+	var done int
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for range opts.Workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range ch {
+				res := report.ItemResult{Provider: j.p.Name(), Prompt: j.t.Name, Category: j.t.Category}
+				cctx, cancel := context.WithTimeout(ctx, opts.ItemTimeout)
+				out, err := j.p.Speak(cctx, j.t.User)
+				cancel()
+				if err != nil {
+					res.Error = err.Error()
+				} else {
+					res.TTFAudioMS = out.TTFAudioMS
+					res.CompletionMS = out.TotalMS
+					res.OutputAudioMS = out.AudioMS
+				}
+				results[j.idx] = res
+				if opts.Progress != nil {
+					mu.Lock()
+					done++
+					opts.Progress(done, len(jobs))
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	for _, j := range jobs {
+		ch <- j
+	}
+	close(ch)
+	wg.Wait()
+	return results
+}
+
 func runOneLLM(ctx context.Context, t provider.LLMTarget, p manifest.Prompt, opts Options) report.ItemResult {
 	res := report.ItemResult{Provider: t.Name(), Prompt: p.Name, Category: p.Category}
 	cctx, cancel := context.WithTimeout(ctx, opts.ItemTimeout)
