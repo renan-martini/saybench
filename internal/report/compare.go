@@ -90,6 +90,9 @@ func ConditionNote(a, b Report) string {
 	if a.S2SScoring != b.S2SScoring && (a.S2SScoring != "" || b.S2SScoring != "") {
 		return fmt.Sprintf("warning: comparing a %q s2s run with a %q s2s run — the tasks differ (echo replies are short and scored; conversational replies are free-form), so latency and speech-out deltas mix conditions", orConv(a.S2SScoring), orConv(b.S2SScoring))
 	}
+	if a.Judge != b.Judge {
+		return fmt.Sprintf("warning: comparing runs with different judges (%q vs %q) — judge scores are judge-relative; deltas mix graders", orNone(a.Judge), orNone(b.Judge))
+	}
 	if a.S2STurnEnding != b.S2STurnEnding && (a.S2STurnEnding != "" || b.S2STurnEnding != "") {
 		return fmt.Sprintf("warning: comparing s2s runs with different turn-ending (%q vs %q) — server_vad V2V includes VAD hangover; deltas mix semantics", orCommit(a.S2STurnEnding), orCommit(b.S2STurnEnding))
 	}
@@ -118,6 +121,13 @@ func orConv(s string) string {
 func orCommit(s string) string {
 	if s == "" {
 		return "commit"
+	}
+	return s
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "unjudged"
 	}
 	return s
 }

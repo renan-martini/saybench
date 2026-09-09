@@ -8,6 +8,7 @@ import (
 
 	"github.com/renan-martini/saybench/internal/manifest"
 	"github.com/renan-martini/saybench/internal/provider"
+	"github.com/renan-martini/saybench/internal/report"
 )
 
 func TestRunWithFake(t *testing.T) {
@@ -158,5 +159,29 @@ func TestRunS2SEchoScores(t *testing.T) {
 	conv := RunS2S(context.Background(), []provider.S2SProvider{f2}, items, Options{Workers: 1})
 	if conv[0].RefWords != 0 || conv[0].KeytermsTotal != 0 {
 		t.Fatalf("conversational run must not score: %+v", conv[0])
+	}
+}
+
+func TestJudgeItems(t *testing.T) {
+	items := []report.ItemResult{
+		{Provider: "p", Reference: "pay two hundred dollars", Hypothesis: "pay two hundred dollars", RefWords: 4},
+		{Provider: "p", Reference: "x", Hypothesis: "y", Error: "boom"}, // errored items skipped
+		{Provider: "p", Reference: "", Hypothesis: "chatter"},           // unscored items skipped
+	}
+	errs := JudgeItems(context.Background(), provider.NewFakeLLM(), items, Options{})
+	if len(errs) != 0 {
+		t.Fatalf("unexpected judge errors: %v", errs)
+	}
+	if !items[0].JudgeScored || items[0].JudgeScore < 0 || items[0].JudgeScore > 1 {
+		t.Fatalf("item 0 not judged sanely: %+v", items[0])
+	}
+	if items[1].JudgeScored || items[2].JudgeScored {
+		t.Fatal("errored/unscored items must not be judged")
+	}
+	// determinism
+	items2 := []report.ItemResult{{Provider: "p", Reference: "pay two hundred dollars", Hypothesis: "pay two hundred dollars", RefWords: 4}}
+	JudgeItems(context.Background(), provider.NewFakeLLM(), items2, Options{})
+	if items2[0].JudgeScore != items[0].JudgeScore {
+		t.Fatal("fake judge must be deterministic")
 	}
 }

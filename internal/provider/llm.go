@@ -223,6 +223,17 @@ func (f *FakeLLM) Complete(_ context.Context, p ChatPrompt) (LLMResult, error) {
 	h.Write([]byte(p.User))
 	n := h.Sum32()
 	words := len(strings.Fields(p.User))
+	if strings.Contains(p.User, "Answer with the number only") {
+		// Judge-rubric mode: answer deterministically so CI can exercise
+		// the judging path offline.
+		return LLMResult{
+			Text:         fmt.Sprintf("%d", 60+n%41),
+			TTFTMS:       int(50 + n%50),
+			CompletionMS: int(120 + n%80),
+			InputTokens:  words,
+			OutputTokens: 1,
+		}, nil
+	}
 	return LLMResult{
 		Text:         fmt.Sprintf("Understood: %s", p.User),
 		TTFTMS:       int(120 + n%180),

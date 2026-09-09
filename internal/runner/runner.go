@@ -5,6 +5,8 @@ package runner
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -428,6 +430,71 @@ func runOne(ctx context.Context, p provider.Provider, it manifest.Item, opts Opt
 		res.MissedKeyterms = missed
 	}
 	return res
+}
+
+// judgeRubric is fixed: comparability across runs depends on every judge
+// getting the same task. The response must be a bare number 0-100.
+const judgeRubric = "You are grading a speech transcript. Reference (what was actually said):\n%s\n\nTranscript under test:\n%s\n\nDoes the transcript preserve the meaning of the reference? Ignore punctuation, casing, and formatting differences (digits vs spelled-out numbers are equivalent). Answer with exactly one integer from 0 to 100, where 100 means the meaning is fully preserved and 0 means it is lost. Answer with the number only."
+
+// JudgeItems rates each scored item's hypothesis against its reference with
+// an LLM judge, filling JudgeScore/JudgeScored in place. An addition beside
+// WER, never a replacement: literal scoring stays untouched. Each judged
+// item costs one LLM call. Per-item failures are returned as warnings and
+// leave the item unjudged rather than failing the run.
+func JudgeItems(ctx context.Context, judge provider.LLMTarget, items []report.ItemResult, opts Options) []error {
+	if opts.ItemTimeout <= 0 {
+		opts.ItemTimeout = 60 * time.Second
+	}
+	var errs []error
+	for i := range items {
+		it := &items[i]
+		if it.Error != "" || it.Reference == "" || it.RefWords == 0 {
+			continue
+		}
+		cctx, cancel := context.WithTimeout(ctx, opts.ItemTimeout)
+		out, err := judge.Complete(cctx, provider.ChatPrompt{
+			User:      fmt.Sprintf(judgeRubric, it.Reference, it.Hypothesis),
+			MaxTokens: 8,
+		})
+		cancel()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("judge %s on %s/%s: %w", judge.Name(), it.Provider, it.Audio, err))
+			continue
+		}
+		score, err := parseJudgeScore(out.Text)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("judge %s returned %q for %s: %w", judge.Name(), out.Text, it.Audio, err))
+			continue
+		}
+		it.JudgeScore = score
+		it.JudgeScored = true
+	}
+	return errs
+}
+
+// parseJudgeScore extracts the 0-100 integer the rubric demands.
+func parseJudgeScore(text string) (float64, error) {
+	num := ""
+	for _, r := range strings.TrimSpace(text) {
+		if r >= '0' && r <= '9' {
+			num += string(r)
+			if len(num) > 3 {
+				break
+			}
+			continue
+		}
+		if num != "" {
+			break
+		}
+	}
+	if num == "" {
+		return 0, fmt.Errorf("no number in judge response")
+	}
+	n, err := strconv.Atoi(num)
+	if err != nil || n < 0 || n > 100 {
+		return 0, fmt.Errorf("judge score %q out of range", num)
+	}
+	return float64(n) / 100, nil
 }
 
 // clipDurationMS parses the clip locally for cost accounting; 0 when the

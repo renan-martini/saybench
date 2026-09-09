@@ -264,3 +264,23 @@ func TestTTSAggregation(t *testing.T) {
 		t.Fatal("tts mode must omit category summaries")
 	}
 }
+
+func TestJudgeAggregationAndCondition(t *testing.T) {
+	items := []ItemResult{
+		{Provider: "p", RefWords: 5, JudgeScore: 0.9, JudgeScored: true},
+		{Provider: "p", RefWords: 5, JudgeScore: 0.5, JudgeScored: true},
+		{Provider: "p", RefWords: 5}, // unjudged (e.g. judge call failed)
+	}
+	r := Build("t", "m", items)
+	r.Judge = "openai:gpt-4o-mini"
+	if s := r.Summaries[0]; s.AvgJudgeScore != 0.7 {
+		t.Fatalf("judge avg = %v, want 0.7 (over judged items only)", s.AvgJudgeScore)
+	}
+	plain := Build("t", "m", []ItemResult{{Provider: "p", RefWords: 5}})
+	if plain.Summaries[0].AvgJudgeScore != -1 {
+		t.Fatalf("unjudged summary = %v, want -1 sentinel", plain.Summaries[0].AvgJudgeScore)
+	}
+	if note := ConditionNote(r, plain); note == "" {
+		t.Fatal("judged-vs-unjudged compare must warn")
+	}
+}

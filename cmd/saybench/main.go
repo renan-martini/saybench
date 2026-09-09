@@ -110,6 +110,7 @@ func cmdSTT(ctx context.Context, args []string) error {
 	format := fs.String("format", "table", "stdout format: table or json (json is the full report, machine- and LLM-readable)")
 	normalize := fs.String("normalize", "", `"" (literal scoring) | "digits" — canonicalize digit strings vs spelled digits before scoring`)
 	pricingPath := fs.String("pricing", "", "pricing table JSON (see pricing.example.json); adds cost columns")
+	judgeSpec := fs.String("judge", "", "LLM target that rates semantic preservation per item (e.g. gpt-4o-mini, fake-llm); one LLM call per scored item")
 	workers := fs.Int("workers", 4, "concurrent transcriptions")
 	timeout := fs.Duration("timeout", 60*time.Second, "per-clip timeout")
 	if err := fs.Parse(args); err != nil {
@@ -151,11 +152,20 @@ func cmdSTT(ctx context.Context, args []string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
 	}
+	var judgeName string
+	if *judgeSpec != "" {
+		tmp := report.Report{}
+		if err := applyJudge(ctx, *judgeSpec, results, &tmp); err != nil {
+			return err
+		}
+		judgeName = tmp.Judge
+	}
 	if err := applyPricing(*pricingPath, results, nil); err != nil {
 		return err
 	}
 	rep := report.Build(version, *manifestPath, results)
 	rep.Normalization = *normalize
+	rep.Judge = judgeName
 	switch *format {
 	case "table":
 		printSummary(rep)
@@ -188,6 +198,7 @@ func cmdStream(ctx context.Context, args []string) error {
 	timeout := fs.Duration("timeout", 120*time.Second, "per-clip timeout (must exceed clip duration — audio feeds at real-time pace)")
 	normalize := fs.String("normalize", "", `"" | "digits" — canonicalize digit strings vs spelled digits before scoring`)
 	pricingPath := fs.String("pricing", "", "pricing table JSON (see pricing.example.json); adds cost columns")
+	judgeSpec := fs.String("judge", "", "LLM target that rates semantic preservation per item")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -225,11 +236,20 @@ func cmdStream(ctx context.Context, args []string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
 	}
+	var judgeName string
+	if *judgeSpec != "" {
+		tmp := report.Report{}
+		if err := applyJudge(ctx, *judgeSpec, results, &tmp); err != nil {
+			return err
+		}
+		judgeName = tmp.Judge
+	}
 	if err := applyPricing(*pricingPath, results, nil); err != nil {
 		return err
 	}
 	rep := report.BuildMode(version, *manifestPath, report.ModeStreaming, results)
 	rep.Normalization = *normalize
+	rep.Judge = judgeName
 	switch *format {
 	case "table":
 		printSummary(rep)
@@ -263,6 +283,7 @@ func cmdS2S(ctx context.Context, args []string) error {
 	normalize := fs.String("normalize", "", `"" | "digits" — canonicalize digit strings vs spelled digits before echo scoring`)
 	turnEnding := fs.String("turn-ending", "commit", `"commit" (deterministic) | "server_vad" (production posture — V2V includes VAD hangover; a 1.5s silence tail is appended so the VAD can fire)`)
 	pricingPath := fs.String("pricing", "", "pricing table JSON (see pricing.example.json); adds cost columns")
+	judgeSpec := fs.String("judge", "", "LLM target that rates echo semantic preservation per item (requires -score echo)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -308,10 +329,22 @@ func cmdS2S(ctx context.Context, args []string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
 	}
+	var judgeName string
+	if *judgeSpec != "" {
+		if !echo {
+			return fmt.Errorf("-judge requires -score echo (there is no reference-scored transcript otherwise)")
+		}
+		tmp := report.Report{}
+		if err := applyJudge(ctx, *judgeSpec, results, &tmp); err != nil {
+			return err
+		}
+		judgeName = tmp.Judge
+	}
 	if err := applyPricing(*pricingPath, results, nil); err != nil {
 		return err
 	}
 	rep := report.BuildMode(version, *manifestPath, report.ModeS2S, results)
+	rep.Judge = judgeName
 	rep.S2SScoring = "conversational"
 	if echo {
 		rep.S2SScoring = "echo"
@@ -471,6 +504,26 @@ func cmdLLM(ctx context.Context, args []string) error {
 	return nil
 }
 
+// applyJudge runs judge scoring over items when a judge target is named.
+func applyJudge(ctx context.Context, spec string, items []report.ItemResult, rep *report.Report) error {
+	if spec == "" {
+		return nil
+	}
+	ts, err := provider.FromLLMSpecs(spec)
+	if err != nil {
+		return err
+	}
+	if len(ts) != 1 {
+		return fmt.Errorf("-judge takes exactly one LLM target")
+	}
+	fmt.Fprintf(os.Stderr, "saybench: judging %s\n", ts[0].Name())
+	for _, werr := range runner.JudgeItems(ctx, ts[0], items, runner.Options{}) {
+		fmt.Fprintf(os.Stderr, "saybench: warning: %v (item left unjudged)\n", werr)
+	}
+	rep.Judge = ts[0].Name()
+	return nil
+}
+
 // textOf finds a prompt's user text by scenario name (tts char pricing).
 func textOf(prompts []manifest.Prompt, name string) string {
 	for _, p := range prompts {
@@ -576,10 +629,10 @@ func printSummary(r report.Report) {
 				s.AvgTTFPartialMS, s.P95TTFPartialMS, s.AvgFinalLagMS, s.P95FinalLagMS, report.FormatPct(s.InterimWordSurvival))
 		}
 	} else {
-		fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tAVG LATENCY\tP95 LATENCY")
+		fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tJUDGE\tAVG LATENCY\tP95 LATENCY")
 		for _, s := range r.Summaries {
-			fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%dms\t%dms\n",
-				s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), report.FormatPct(s.KeytermRecall), s.AvgLatencyMS, s.P95LatencyMS)
+			fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%s\t%dms\t%dms\n",
+				s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), report.FormatPct(s.KeytermRecall), report.FormatPct(s.AvgJudgeScore), s.AvgLatencyMS, s.P95LatencyMS)
 		}
 	}
 	w.Flush()

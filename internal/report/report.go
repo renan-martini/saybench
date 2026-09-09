@@ -57,6 +57,10 @@ type ItemResult struct {
 	AudioDurationMS int `json:"audio_duration_ms,omitempty"`
 	// InputTokens from the usage frame (llm mode), for cost.
 	InputTokens int `json:"input_tokens,omitempty"`
+	// JudgeScore (0..1) rates semantic preservation per the fixed rubric;
+	// JudgeScored distinguishes "scored 0" from "never judged".
+	JudgeScore  float64 `json:"judge_score,omitempty"`
+	JudgeScored bool    `json:"judge_scored,omitempty"`
 	// CostUSD is computed only when a -pricing table is supplied; absent
 	// means "no pricing given", never "free".
 	CostUSD float64 `json:"cost_usd,omitempty"`
@@ -102,6 +106,8 @@ type Summary struct {
 	// TTS-mode aggregates.
 	AvgTTFAudioMS int64 `json:"avg_ttf_audio_ms,omitempty"`
 	P95TTFAudioMS int64 `json:"p95_ttf_audio_ms,omitempty"`
+	// AvgJudgeScore averages judge scores over judged items; -1 = unjudged.
+	AvgJudgeScore float64 `json:"avg_judge_score,omitempty"`
 	// TotalCostUSD sums item costs; present only when pricing was supplied.
 	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
 	// S2S-mode aggregates.
@@ -136,14 +142,17 @@ type Report struct {
 	Normalization string `json:"normalization,omitempty"`
 	// S2STurnEnding records "commit" or "server_vad" — different V2V
 	// semantics (server_vad includes VAD hangover), different experiments.
-	S2STurnEnding string            `json:"s2s_turn_ending,omitempty"`
-	Tool          string            `json:"tool"`
-	ToolVersion   string            `json:"tool_version"`
-	CreatedAt     time.Time         `json:"created_at"`
-	Manifest      string            `json:"manifest"`
-	Summaries     []Summary         `json:"summaries"`
-	Categories    []CategorySummary `json:"categories"`
-	Items         []ItemResult      `json:"items"`
+	S2STurnEnding string `json:"s2s_turn_ending,omitempty"`
+	// Judge names the LLM target that rated semantic preservation ("" =
+	// unjudged). Different judges are different experiments.
+	Judge       string            `json:"judge,omitempty"`
+	Tool        string            `json:"tool"`
+	ToolVersion string            `json:"tool_version"`
+	CreatedAt   time.Time         `json:"created_at"`
+	Manifest    string            `json:"manifest"`
+	Summaries   []Summary         `json:"summaries"`
+	Categories  []CategorySummary `json:"categories"`
+	Items       []ItemResult      `json:"items"`
 }
 
 // Build assembles a batch-mode report, computing summaries from items.
@@ -157,6 +166,8 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 		edits, words, errs, n int
 		ktHit, ktTotal        int
 		survHit, survTotal    int
+		judgeSum              float64
+		judged                int
 		latencies             []int64
 		ttfps, lags           []int64
 		ttfts, completions    []int64
@@ -189,6 +200,10 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 			x.words += it.RefWords
 			x.ktHit += it.KeytermsHit
 			x.ktTotal += it.KeytermsTotal
+			if it.JudgeScored {
+				x.judgeSum += it.JudgeScore
+				x.judged++
+			}
 			x.latencies = append(x.latencies, it.LatencyMS)
 			if mode == ModeStreaming {
 				x.ttfps = append(x.ttfps, int64(it.TTFPartialMS))
@@ -243,6 +258,10 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 	var summaries []Summary
 	for p, a := range byProvider {
 		s := Summary{Provider: p, Items: a.n, Errors: a.errs, WER: rate(a), KeytermRecall: recall(a)}
+		s.AvgJudgeScore = -1
+		if a.judged > 0 {
+			s.AvgJudgeScore = a.judgeSum / float64(a.judged)
+		}
 		s.TotalCostUSD = costByProvider[p]
 		s.AvgLatencyMS, s.P95LatencyMS = avgP95(a.latencies)
 		s.AvgTTFPartialMS, s.P95TTFPartialMS = avgP95(a.ttfps)
