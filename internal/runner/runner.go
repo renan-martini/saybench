@@ -11,6 +11,7 @@ import (
 	"github.com/renan-martini/saybench/internal/manifest"
 	"github.com/renan-martini/saybench/internal/provider"
 	"github.com/renan-martini/saybench/internal/report"
+	"github.com/renan-martini/saybench/internal/wav"
 	"github.com/renan-martini/saybench/internal/wer"
 )
 
@@ -134,6 +135,7 @@ func runOneStream(ctx context.Context, p provider.StreamingProvider, it manifest
 		Category:  it.Category,
 		Reference: it.Reference,
 	}
+	res.AudioDurationMS = clipDurationMS(it.Audio)
 	cctx, cancel := context.WithTimeout(ctx, opts.ItemTimeout)
 	defer cancel()
 	out, err := p.StreamTranscribe(cctx, it.Audio)
@@ -287,6 +289,7 @@ func RunS2S(ctx context.Context, providers []provider.S2SProvider, items []manif
 
 func runOneS2S(ctx context.Context, p provider.S2SProvider, it manifest.Item, opts Options) report.ItemResult {
 	res := report.ItemResult{Provider: p.Name(), Audio: it.Audio, Category: it.Category, Reference: it.Reference}
+	res.AudioDurationMS = clipDurationMS(it.Audio)
 	cctx, cancel := context.WithTimeout(ctx, opts.ItemTimeout)
 	defer cancel()
 	out, err := p.Converse(cctx, it.Audio)
@@ -387,6 +390,7 @@ func runOneLLM(ctx context.Context, t provider.LLMTarget, p manifest.Prompt, opt
 	res.TTFTMS = out.TTFTMS
 	res.CompletionMS = out.CompletionMS
 	res.OutputTokens = out.OutputTokens
+	res.InputTokens = out.InputTokens
 	return res
 }
 
@@ -397,6 +401,7 @@ func runOne(ctx context.Context, p provider.Provider, it manifest.Item, opts Opt
 		Category:  it.Category,
 		Reference: it.Reference,
 	}
+	res.AudioDurationMS = clipDurationMS(it.Audio)
 	cctx, cancel := context.WithTimeout(ctx, opts.ItemTimeout)
 	defer cancel()
 
@@ -423,4 +428,14 @@ func runOne(ctx context.Context, p provider.Provider, it manifest.Item, opts Opt
 		res.MissedKeyterms = missed
 	}
 	return res
+}
+
+// clipDurationMS parses the clip locally for cost accounting; 0 when the
+// file is not parseable PCM (never an error — duration is auxiliary).
+func clipDurationMS(path string) int {
+	f, err := wav.Parse(path)
+	if err != nil {
+		return 0
+	}
+	return int(f.Duration().Milliseconds())
 }

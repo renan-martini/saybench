@@ -53,6 +53,13 @@ type ItemResult struct {
 	OutputTokens int    `json:"output_tokens,omitempty"`
 	// TTS-mode field (CompletionMS and OutputAudioMS are shared).
 	TTFAudioMS int `json:"ttf_audio_ms,omitempty"`
+	// AudioDurationMS is the input clip's duration (audio modes), for cost.
+	AudioDurationMS int `json:"audio_duration_ms,omitempty"`
+	// InputTokens from the usage frame (llm mode), for cost.
+	InputTokens int `json:"input_tokens,omitempty"`
+	// CostUSD is computed only when a -pricing table is supplied; absent
+	// means "no pricing given", never "free".
+	CostUSD float64 `json:"cost_usd,omitempty"`
 	// S2S-mode fields: the turn-taking numbers.
 	V2VFirstAudioMS int `json:"v2v_first_audio_ms,omitempty"`
 	ResponseDoneMS  int `json:"response_done_ms,omitempty"`
@@ -95,6 +102,8 @@ type Summary struct {
 	// TTS-mode aggregates.
 	AvgTTFAudioMS int64 `json:"avg_ttf_audio_ms,omitempty"`
 	P95TTFAudioMS int64 `json:"p95_ttf_audio_ms,omitempty"`
+	// TotalCostUSD sums item costs; present only when pricing was supplied.
+	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
 	// S2S-mode aggregates.
 	AvgV2VFirstAudioMS int64 `json:"avg_v2v_first_audio_ms,omitempty"`
 	P95V2VFirstAudioMS int64 `json:"p95_v2v_first_audio_ms,omitempty"`
@@ -217,6 +226,10 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 		return float64(a.edits) / float64(a.words)
 	}
 
+	costByProvider := map[string]float64{}
+	for _, it := range items {
+		costByProvider[it.Provider] += it.CostUSD
+	}
 	recall := func(a *agg) float64 {
 		if a.ktTotal == 0 {
 			return -1
@@ -227,6 +240,7 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 	var summaries []Summary
 	for p, a := range byProvider {
 		s := Summary{Provider: p, Items: a.n, Errors: a.errs, WER: rate(a), KeytermRecall: recall(a)}
+		s.TotalCostUSD = costByProvider[p]
 		s.AvgLatencyMS, s.P95LatencyMS = avgP95(a.latencies)
 		s.AvgTTFPartialMS, s.P95TTFPartialMS = avgP95(a.ttfps)
 		s.AvgFinalLagMS, s.P95FinalLagMS = avgP95(a.lags)

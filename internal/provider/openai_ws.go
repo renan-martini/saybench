@@ -143,6 +143,7 @@ func (o *openAIResponsesWS) completeOnce(ctx context.Context, p ChatPrompt) (LLM
 			Delta    string `json:"delta"`
 			Response struct {
 				Usage struct {
+					InputTokens  int `json:"input_tokens"`
 					OutputTokens int `json:"output_tokens"`
 				} `json:"usage"`
 				Error struct {
@@ -167,6 +168,7 @@ func (o *openAIResponsesWS) completeOnce(ctx context.Context, p ChatPrompt) (LLM
 			if !firstToken.IsZero() {
 				res.TTFTMS = ceilMS(firstToken.Sub(start))
 			}
+			res.InputTokens = ev.Response.Usage.InputTokens
 			res.OutputTokens = ev.Response.Usage.OutputTokens
 			if res.Text == "" {
 				return LLMResult{}, false, fmt.Errorf("%s: response completed with no content", o.name)

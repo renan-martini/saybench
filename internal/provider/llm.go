@@ -30,7 +30,8 @@ type LLMResult struct {
 	TTFTMS int
 	// CompletionMS: request sent -> stream finished.
 	CompletionMS int
-	// OutputTokens from the usage frame; 0 if the endpoint omits usage.
+	// InputTokens / OutputTokens from the usage frame; 0 if omitted.
+	InputTokens  int
 	OutputTokens int
 }
 
@@ -178,6 +179,7 @@ func (o *openAICompatible) Complete(ctx context.Context, p ChatPrompt) (LLMResul
 				} `json:"delta"`
 			} `json:"choices"`
 			Usage *struct {
+				PromptTokens     int `json:"prompt_tokens"`
 				CompletionTokens int `json:"completion_tokens"`
 			} `json:"usage"`
 		}
@@ -191,6 +193,7 @@ func (o *openAICompatible) Complete(ctx context.Context, p ChatPrompt) (LLMResul
 			text.WriteString(ev.Choices[0].Delta.Content)
 		}
 		if ev.Usage != nil {
+			res.InputTokens = ev.Usage.PromptTokens
 			res.OutputTokens = ev.Usage.CompletionTokens
 		}
 	}
@@ -224,6 +227,7 @@ func (f *FakeLLM) Complete(_ context.Context, p ChatPrompt) (LLMResult, error) {
 		Text:         fmt.Sprintf("Understood: %s", p.User),
 		TTFTMS:       int(120 + n%180),
 		CompletionMS: int(400 + n%300),
+		InputTokens:  10 + words,
 		OutputTokens: 2 + words,
 	}, nil
 }

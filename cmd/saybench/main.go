@@ -18,6 +18,7 @@ import (
 
 	"github.com/renan-martini/saybench/internal/dashboard"
 	"github.com/renan-martini/saybench/internal/manifest"
+	"github.com/renan-martini/saybench/internal/pricing"
 	"github.com/renan-martini/saybench/internal/provider"
 	"github.com/renan-martini/saybench/internal/report"
 	"github.com/renan-martini/saybench/internal/runner"
@@ -104,6 +105,7 @@ func cmdSTT(ctx context.Context, args []string) error {
 	reportPath := fs.String("report", "", "write the full JSON report here")
 	format := fs.String("format", "table", "stdout format: table or json (json is the full report, machine- and LLM-readable)")
 	normalize := fs.String("normalize", "", `"" (literal scoring) | "digits" — canonicalize digit strings vs spelled digits before scoring`)
+	pricingPath := fs.String("pricing", "", "pricing table JSON (see pricing.example.json); adds cost columns")
 	workers := fs.Int("workers", 4, "concurrent transcriptions")
 	timeout := fs.Duration("timeout", 60*time.Second, "per-clip timeout")
 	if err := fs.Parse(args); err != nil {
@@ -145,6 +147,9 @@ func cmdSTT(ctx context.Context, args []string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
 	}
+	if err := applyPricing(*pricingPath, results, nil); err != nil {
+		return err
+	}
 	rep := report.Build(version, *manifestPath, results)
 	rep.Normalization = *normalize
 	switch *format {
@@ -178,6 +183,7 @@ func cmdStream(ctx context.Context, args []string) error {
 	workers := fs.Int("workers", 4, "concurrent streams")
 	timeout := fs.Duration("timeout", 120*time.Second, "per-clip timeout (must exceed clip duration — audio feeds at real-time pace)")
 	normalize := fs.String("normalize", "", `"" | "digits" — canonicalize digit strings vs spelled digits before scoring`)
+	pricingPath := fs.String("pricing", "", "pricing table JSON (see pricing.example.json); adds cost columns")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -215,6 +221,9 @@ func cmdStream(ctx context.Context, args []string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
 	}
+	if err := applyPricing(*pricingPath, results, nil); err != nil {
+		return err
+	}
 	rep := report.BuildMode(version, *manifestPath, report.ModeStreaming, results)
 	rep.Normalization = *normalize
 	switch *format {
@@ -248,6 +257,7 @@ func cmdS2S(ctx context.Context, args []string) error {
 	timeout := fs.Duration("timeout", 120*time.Second, "per-turn timeout (audio feeds at real-time pace)")
 	score := fs.String("score", "", `"" = conversational (latency only) | "echo" = repeat-back task, comprehension-scored with WER + keyterm recall`)
 	normalize := fs.String("normalize", "", `"" | "digits" — canonicalize digit strings vs spelled digits before echo scoring`)
+	pricingPath := fs.String("pricing", "", "pricing table JSON (see pricing.example.json); adds cost columns")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -290,6 +300,9 @@ func cmdS2S(ctx context.Context, args []string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
 	}
+	if err := applyPricing(*pricingPath, results, nil); err != nil {
+		return err
+	}
 	rep := report.BuildMode(version, *manifestPath, report.ModeS2S, results)
 	rep.S2SScoring = "conversational"
 	if echo {
@@ -325,6 +338,7 @@ func cmdTTS(ctx context.Context, args []string) error {
 	format := fs.String("format", "table", "stdout format: table or json")
 	workers := fs.Int("workers", 4, "concurrent syntheses")
 	timeout := fs.Duration("timeout", 60*time.Second, "per-utterance timeout")
+	pricingPath := fs.String("pricing", "", "pricing table JSON (see pricing.example.json); adds cost columns")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -352,6 +366,9 @@ func cmdTTS(ctx context.Context, args []string) error {
 	})
 	if ctx.Err() != nil {
 		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
+	}
+	if err := applyPricing(*pricingPath, results, func(it report.ItemResult) string { return textOf(texts, it.Prompt) }); err != nil {
+		return err
 	}
 	rep := report.BuildMode(version, *textsPath, report.ModeTTS, results)
 	switch *format {
@@ -384,6 +401,7 @@ func cmdLLM(ctx context.Context, args []string) error {
 	workers := fs.Int("workers", 4, "concurrent requests")
 	timeout := fs.Duration("timeout", 60*time.Second, "per-prompt timeout")
 	warmup := fs.Bool("warmup", true, "one unmeasured request per target first, so TTFT reflects warm connections (production posture); -warmup=false measures cold starts")
+	pricingPath := fs.String("pricing", "", "pricing table JSON (see pricing.example.json); adds cost columns")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -418,6 +436,9 @@ func cmdLLM(ctx context.Context, args []string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
 	}
+	if err := applyPricing(*pricingPath, results, nil); err != nil {
+		return err
+	}
 	rep := report.BuildMode(version, *promptsPath, report.ModeLLM, results)
 	rep.Warmup = *warmup
 	switch *format {
@@ -441,6 +462,36 @@ func cmdLLM(ctx context.Context, args []string) error {
 	return nil
 }
 
+// textOf finds a prompt's user text by scenario name (tts char pricing).
+func textOf(prompts []manifest.Prompt, name string) string {
+	for _, p := range prompts {
+		if p.Name == name {
+			return p.User
+		}
+	}
+	return ""
+}
+
+// applyPricing loads a user-supplied rate table (if any) and stamps item
+// costs. texts maps item index -> synthesized text for tts char pricing.
+func applyPricing(path string, items []report.ItemResult, textFor func(report.ItemResult) string) error {
+	if path == "" {
+		return nil
+	}
+	tbl, err := pricing.Load(path)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		txt := ""
+		if textFor != nil {
+			txt = textFor(items[i])
+		}
+		items[i].CostUSD = tbl.CostFor(items[i], txt)
+	}
+	return nil
+}
+
 // scoreOpts maps the -normalize flag to scoring options.
 func scoreOpts(normalize string) (wer.Opts, error) {
 	switch normalize {
@@ -453,6 +504,28 @@ func scoreOpts(normalize string) (wer.Opts, error) {
 	}
 }
 
+func printCost(r report.Report) {
+	var total float64
+	var any bool
+	for _, s := range r.Summaries {
+		if s.TotalCostUSD > 0 {
+			any = true
+			total += s.TotalCostUSD
+		}
+	}
+	if !any {
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	fmt.Fprintf(w, "\nCOST (from your pricing table)\ttotal $%.4f\n", total)
+	for _, s := range r.Summaries {
+		if s.TotalCostUSD > 0 {
+			fmt.Fprintf(w, "  %s\t$%.4f\n", s.Provider, s.TotalCostUSD)
+		}
+	}
+	w.Flush()
+}
+
 func printSummary(r report.Report) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 	if r.Mode == report.ModeTTS {
@@ -462,6 +535,7 @@ func printSummary(r report.Report) {
 				s.Provider, s.Items, s.Errors, s.AvgTTFAudioMS, s.P95TTFAudioMS, s.AvgCompletionMS, s.AvgOutputAudioMS)
 		}
 		w.Flush()
+		printCost(r)
 		return
 	}
 	if r.Mode == report.ModeS2S {
@@ -472,6 +546,7 @@ func printSummary(r report.Report) {
 				s.AvgV2VFirstAudioMS, s.P95V2VFirstAudioMS, s.AvgResponseDoneMS, s.AvgOutputAudioMS)
 		}
 		w.Flush()
+		printCost(r)
 		return
 	}
 	if r.Mode == report.ModeLLM {
@@ -481,6 +556,7 @@ func printSummary(r report.Report) {
 				s.Provider, s.Items, s.Errors, s.AvgTTFTMS, s.P95TTFTMS, s.AvgCompletionMS, s.AvgTokensPerSec)
 		}
 		w.Flush()
+		printCost(r)
 		return
 	}
 	if r.Mode == report.ModeStreaming {
@@ -498,6 +574,7 @@ func printSummary(r report.Report) {
 		}
 	}
 	w.Flush()
+	printCost(r)
 
 	fmt.Println()
 	w = tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
