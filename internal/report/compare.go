@@ -90,6 +90,9 @@ func ConditionNote(a, b Report) string {
 	if a.S2SScoring != b.S2SScoring && (a.S2SScoring != "" || b.S2SScoring != "") {
 		return fmt.Sprintf("warning: comparing a %q s2s run with a %q s2s run — the tasks differ (echo replies are short and scored; conversational replies are free-form), so latency and speech-out deltas mix conditions", orConv(a.S2SScoring), orConv(b.S2SScoring))
 	}
+	if a.S2SBargeIn != b.S2SBargeIn {
+		return "warning: comparing a barge-in run with a non-barge-in run — different experiments entirely"
+	}
 	if a.Judge != b.Judge {
 		return fmt.Sprintf("warning: comparing runs with different judges (%q vs %q) — judge scores are judge-relative; deltas mix graders", orNone(a.Judge), orNone(b.Judge))
 	}

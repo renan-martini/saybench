@@ -22,6 +22,9 @@ type S2SResult struct {
 	ResponseDoneMS int
 	// OutputAudioMS: how long the agent speaks, from the audio bytes.
 	OutputAudioMS int
+	// BargeInStopMS (barge-in runs): first interrupting audio byte sent ->
+	// last output audio delta received. How long the model kept talking.
+	BargeInStopMS int
 }
 
 // S2SProvider runs one conversational turn against a speech-to-speech
@@ -48,6 +51,11 @@ type S2SOpts struct {
 	// production posture: the model detects end-of-speech itself; measured
 	// V2V then INCLUDES VAD hangover time, which is the point).
 	TurnEnding string
+	// BargeIn interrupts the model's reply with a second utterance and
+	// measures how fast it stops talking. Requires server_vad.
+	BargeIn bool
+	// BargeClip is the interrupting audio (default golden/barge/interrupt.wav).
+	BargeClip string
 }
 
 func S2SFromSpecs(specs string, refs map[string]string, echo bool) ([]S2SProvider, error) {
@@ -70,6 +78,7 @@ func S2SFromSpecsOpts(specs string, refs map[string]string, o S2SOpts) ([]S2SPro
 		case "fake-s2s":
 			f := NewFakeS2S(refs)
 			f.Echo = echo
+			f.BargeIn = o.BargeIn
 			out = append(out, f)
 		case "openai":
 			key, err := requireEnv("OPENAI_API_KEY")
@@ -89,6 +98,8 @@ func S2SFromSpecsOpts(specs string, refs map[string]string, o S2SOpts) ([]S2SPro
 				p.instructions = echoInstructions
 			}
 			p.serverVAD = o.TurnEnding == "server_vad"
+			p.bargeIn = o.BargeIn
+			p.bargeClip = o.BargeClip
 			out = append(out, p)
 		case "custom":
 			base := os.Getenv("SAYBENCH_S2S_URL")
@@ -101,6 +112,8 @@ func S2SFromSpecsOpts(specs string, refs map[string]string, o S2SOpts) ([]S2SPro
 				p.instructions = echoInstructions
 			}
 			p.serverVAD = o.TurnEnding == "server_vad"
+			p.bargeIn = o.BargeIn
+			p.bargeClip = o.BargeClip
 			out = append(out, p)
 		default:
 			return nil, fmt.Errorf("unknown s2s provider %q (known: fake-s2s, openai, custom)", s)
@@ -118,6 +131,8 @@ type FakeS2S struct {
 	// Echo makes the fake repeat the reference (with its deterministic
 	// mangle) instead of replying conversationally.
 	Echo bool
+	// BargeIn makes the fake report a deterministic stop latency.
+	BargeIn bool
 }
 
 func NewFakeS2S(refs map[string]string) *FakeS2S { return &FakeS2S{refs: refs} }
@@ -147,7 +162,12 @@ func (f *FakeS2S) Converse(_ context.Context, audioPath string) (S2SResult, erro
 		}
 		transcript = strings.Join(out, " ")
 	}
+	barge := 0
+	if f.BargeIn {
+		barge = int(200 + n%300)
+	}
 	return S2SResult{
+		BargeInStopMS:   barge,
 		Transcript:      transcript,
 		V2VFirstAudioMS: int(300 + n%400),
 		ResponseDoneMS:  int(1500 + n%1000),

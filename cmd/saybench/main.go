@@ -78,7 +78,7 @@ Usage:
   saybench stt     -providers fake,deepgram,openai [-manifest golden/manifest.jsonl] [-report out.json] [-format json]
   saybench stream  -providers fake-stream,deepgram,openai-realtime,assemblyai [same flags]
   saybench llm     -targets fake-llm,gpt-4o-mini,openai-ws:gpt-4o-mini,groq:<m>,openrouter:<m>,custom:<m> [-warmup=false]
-  saybench s2s     -providers fake-s2s,openai,custom [-score echo] [-turn-ending server_vad]
+  saybench s2s     -providers fake-s2s,openai,gemini,custom [-score echo] [-turn-ending server_vad] [-barge-in]
   saybench tts     -providers fake-tts,openai,elevenlabs,custom [-texts llm/golden.jsonl]
   saybench mcp     # Model Context Protocol server on stdio — for coding agents
   saybench compare old.json new.json [-max-wer-regression 2.0]
@@ -284,6 +284,7 @@ func cmdS2S(ctx context.Context, args []string) error {
 	turnEnding := fs.String("turn-ending", "commit", `"commit" (deterministic) | "server_vad" (production posture — V2V includes VAD hangover; a 1.5s silence tail is appended so the VAD can fire)`)
 	pricingPath := fs.String("pricing", "", "pricing table JSON (see pricing.example.json); adds cost columns")
 	judgeSpec := fs.String("judge", "", "LLM target that rates echo semantic preservation per item (requires -score echo)")
+	bargeIn := fs.Bool("barge-in", false, "interrupt the model's reply mid-speech and measure how fast it stops (implies -turn-ending server_vad; not combinable with -score echo)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -293,6 +294,12 @@ func cmdS2S(ctx context.Context, args []string) error {
 	echo := *score == "echo"
 	if *turnEnding != "commit" && *turnEnding != "server_vad" {
 		return fmt.Errorf("unknown -turn-ending %q", *turnEnding)
+	}
+	if *bargeIn {
+		if echo {
+			return fmt.Errorf("-barge-in and -score echo are different experiments; run them separately")
+		}
+		*turnEnding = "server_vad"
 	}
 	items, err := manifest.Load(*manifestPath)
 	if err != nil {
@@ -305,7 +312,7 @@ func cmdS2S(ctx context.Context, args []string) error {
 	for _, it := range items {
 		refs[it.Audio] = it.Reference
 	}
-	ps, err := provider.S2SFromSpecsOpts(*providers, refs, provider.S2SOpts{Echo: echo, TurnEnding: *turnEnding})
+	ps, err := provider.S2SFromSpecsOpts(*providers, refs, provider.S2SOpts{Echo: echo, TurnEnding: *turnEnding, BargeIn: *bargeIn})
 	if err != nil {
 		return err
 	}
@@ -351,6 +358,7 @@ func cmdS2S(ctx context.Context, args []string) error {
 	}
 	rep.Normalization = *normalize
 	rep.S2STurnEnding = *turnEnding
+	rep.S2SBargeIn = *bargeIn
 	switch *format {
 	case "table":
 		printSummary(rep)
@@ -601,6 +609,16 @@ func printSummary(r report.Report) {
 		return
 	}
 	if r.Mode == report.ModeS2S {
+		if r.S2SBargeIn {
+			fmt.Fprintln(w, "PROVIDER\tTURNS\tERRORS\tBARGE-IN STOP AVG\tSTOP P95\tV2V FIRST AUDIO AVG\tSPEECH OUT AVG")
+			for _, s := range r.Summaries {
+				fmt.Fprintf(w, "%s\t%d\t%d\t%dms\t%dms\t%dms\t%dms\n",
+					s.Provider, s.Items, s.Errors, s.AvgBargeInStopMS, s.P95BargeInStopMS, s.AvgV2VFirstAudioMS, s.AvgOutputAudioMS)
+			}
+			w.Flush()
+			printCost(r)
+			return
+		}
 		fmt.Fprintln(w, "PROVIDER\tTURNS\tERRORS\tECHO WER\tKEYTERM RECALL\tV2V FIRST AUDIO AVG\tV2V P95\tRESPONSE DONE AVG\tSPEECH OUT AVG")
 		for _, s := range r.Summaries {
 			fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%dms\t%dms\t%dms\t%dms\n",

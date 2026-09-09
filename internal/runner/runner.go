@@ -303,6 +303,7 @@ func runOneS2S(ctx context.Context, p provider.S2SProvider, it manifest.Item, op
 	res.V2VFirstAudioMS = out.V2VFirstAudioMS
 	res.ResponseDoneMS = out.ResponseDoneMS
 	res.OutputAudioMS = out.OutputAudioMS
+	res.BargeInStopMS = out.BargeInStopMS
 	if opts.EchoScore {
 		c := wer.ComputeOpts(it.Reference, out.Transcript, opts.Score)
 		res.Sub, res.Del, res.Ins, res.RefWords = c.Sub, c.Del, c.Ins, c.RefWords

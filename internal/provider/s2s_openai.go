@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -28,9 +29,18 @@ type realtimeS2S struct {
 	// posture). The feed appends a silence tail so the VAD can fire, and
 	// V2V anchors at end of SPEECH — VAD hangover is part of the number.
 	serverVAD bool
+	// bargeIn interrupts the reply with bargeClip and measures stop time.
+	bargeIn   bool
+	bargeClip string
 }
 
 const s2sRate = 24000
+
+// outcome carries the reader goroutine's terminal result.
+type outcome struct {
+	res S2SResult
+	err error
+}
 
 func newRealtimeS2S(name, base, key, model string) *realtimeS2S {
 	return &realtimeS2S{
@@ -100,13 +110,11 @@ func (r *realtimeS2S) Converse(ctx context.Context, audioPath string) (S2SResult
 		return S2SResult{}, fmt.Errorf("%s: session update: %w", r.name, err)
 	}
 
-	type outcome struct {
-		res S2SResult
-		err error
-	}
 	done := make(chan outcome, 1)
 	var turnEnd time.Time
 	turnEndCh := make(chan time.Time, 1)
+	firstAudioCh := make(chan struct{}, 1)
+	var lastDelta atomicTime
 	go func() {
 		var firstAudio, doneAt time.Time
 		var audioBytes int
@@ -139,7 +147,12 @@ func (r *realtimeS2S) Converse(ctx context.Context, audioPath string) (S2SResult
 			case "response.output_audio.delta", "response.audio.delta":
 				if firstAudio.IsZero() {
 					firstAudio = time.Now()
+					select {
+					case firstAudioCh <- struct{}{}:
+					default:
+					}
 				}
+				lastDelta.set(time.Now())
 				if b, err := base64.StdEncoding.DecodeString(ev.Delta); err == nil {
 					audioBytes += len(b)
 				}
@@ -210,12 +223,90 @@ func (r *realtimeS2S) Converse(ctx context.Context, audioPath string) (S2SResult
 		turnEndCh <- turnEnd
 	}
 
+	if r.bargeIn {
+		return r.bargeInWait(ctx, send, done, firstAudioCh, &lastDelta)
+	}
 	select {
 	case o := <-done:
 		return o.res, o.err
 	case <-ctx.Done():
 		return S2SResult{}, ctx.Err()
 	}
+}
+
+// bargeInWait lets the reply start, interrupts it with the barge clip, and
+// measures how long the model kept talking after the interruption began.
+func (r *realtimeS2S) bargeInWait(ctx context.Context, send func(any) error, done chan outcome, firstAudio chan struct{}, lastDelta *atomicTime) (S2SResult, error) {
+	select {
+	case <-firstAudio:
+	case o := <-done:
+		return o.res, o.err
+	case <-ctx.Done():
+		return S2SResult{}, ctx.Err()
+	}
+	select {
+	case <-time.After(700 * time.Millisecond):
+	case <-ctx.Done():
+		return S2SResult{}, ctx.Err()
+	}
+	clip := r.bargeClip
+	if clip == "" {
+		clip = "golden/barge/interrupt.wav"
+	}
+	bf, err := wav.Parse(clip)
+	if err != nil {
+		return S2SResult{}, fmt.Errorf("%s: barge clip: %w", r.name, err)
+	}
+	bpcm := resampleTo(bf, s2sRate)
+	interruptStart := time.Now()
+	brf := &wav.File{SampleRate: s2sRate, Channels: 1, BitsPerSample: 16, Data: bpcm}
+	if _, _, err := feed(ctx, brf, func(chunk []byte) error {
+		return send(map[string]any{"type": "input_audio_buffer.append", "audio": base64.StdEncoding.EncodeToString(chunk)})
+	}); err != nil {
+		return S2SResult{}, fmt.Errorf("%s: send interrupt: %w", r.name, err)
+	}
+	// The model stopped when its deltas did: wait for done, or for the
+	// delta stream to have gone silent long enough to call it stopped.
+	deadline := time.After(6 * time.Second)
+	var o outcome
+waitStop:
+	for {
+		select {
+		case o = <-done:
+			break waitStop
+		case <-deadline:
+			break waitStop
+		case <-time.After(250 * time.Millisecond):
+			if ld := lastDelta.get(); !ld.IsZero() && time.Since(ld) > 2*time.Second {
+				break waitStop
+			}
+		case <-ctx.Done():
+			return S2SResult{}, ctx.Err()
+		}
+	}
+	if o.err != nil {
+		return S2SResult{}, o.err
+	}
+	res := o.res
+	if ld := lastDelta.get(); !ld.IsZero() {
+		stop := int(ld.Sub(interruptStart).Milliseconds())
+		if stop < 0 {
+			stop = 0
+		}
+		res.BargeInStopMS = stop + 1 // never 0 for a measured stop
+	}
+	return res, nil
+}
+
+// atomicTime is a tiny atomic wrapper for the last-delta timestamp.
+type atomicTime struct{ v atomic.Value }
+
+func (a *atomicTime) set(t time.Time) { a.v.Store(t) }
+func (a *atomicTime) get() time.Time {
+	if t, ok := a.v.Load().(time.Time); ok {
+		return t
+	}
+	return time.Time{}
 }
 
 func hasQuery(u string) bool {

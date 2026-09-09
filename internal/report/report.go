@@ -68,6 +68,9 @@ type ItemResult struct {
 	V2VFirstAudioMS int `json:"v2v_first_audio_ms,omitempty"`
 	ResponseDoneMS  int `json:"response_done_ms,omitempty"`
 	OutputAudioMS   int `json:"output_audio_ms,omitempty"`
+	// BargeInStopMS (s2s barge-in runs): how long the model kept talking
+	// after the interruption began.
+	BargeInStopMS int `json:"barge_in_stop_ms,omitempty"`
 	// Keyterm recall: of the clip's important terms, how many survived
 	// transcription intact. MissedKeyterms names the casualties.
 	KeytermsTotal  int      `json:"keyterms_total,omitempty"`
@@ -115,6 +118,8 @@ type Summary struct {
 	P95V2VFirstAudioMS int64 `json:"p95_v2v_first_audio_ms,omitempty"`
 	AvgResponseDoneMS  int64 `json:"avg_response_done_ms,omitempty"`
 	AvgOutputAudioMS   int64 `json:"avg_output_audio_ms,omitempty"`
+	AvgBargeInStopMS   int64 `json:"avg_barge_in_stop_ms,omitempty"`
+	P95BargeInStopMS   int64 `json:"p95_barge_in_stop_ms,omitempty"`
 }
 
 // CategorySummary aggregates one provider within one failure-mode category.
@@ -145,7 +150,9 @@ type Report struct {
 	S2STurnEnding string `json:"s2s_turn_ending,omitempty"`
 	// Judge names the LLM target that rated semantic preservation ("" =
 	// unjudged). Different judges are different experiments.
-	Judge       string            `json:"judge,omitempty"`
+	Judge string `json:"judge,omitempty"`
+	// S2SBargeIn marks a barge-in run — a different experiment entirely.
+	S2SBargeIn  bool              `json:"s2s_barge_in,omitempty"`
 	Tool        string            `json:"tool"`
 	ToolVersion string            `json:"tool_version"`
 	CreatedAt   time.Time         `json:"created_at"`
@@ -173,6 +180,7 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 		ttfts, completions    []int64
 		tokRates              []float64
 		v2vs, dones, outAudio []int64
+		bargeStops            []int64
 		ttfas, ttsTotals      []int64
 	}
 	byProvider := map[string]*agg{}
@@ -223,6 +231,9 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 				x.v2vs = append(x.v2vs, int64(it.V2VFirstAudioMS))
 				x.dones = append(x.dones, int64(it.ResponseDoneMS))
 				x.outAudio = append(x.outAudio, int64(it.OutputAudioMS))
+				if it.BargeInStopMS > 0 {
+					x.bargeStops = append(x.bargeStops, int64(it.BargeInStopMS))
+				}
 			}
 			if mode == ModeTTS {
 				x.ttfas = append(x.ttfas, int64(it.TTFAudioMS))
@@ -287,6 +298,7 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 			s.AvgV2VFirstAudioMS, s.P95V2VFirstAudioMS = avgP95(a.v2vs)
 			s.AvgResponseDoneMS, _ = avgP95(a.dones)
 			s.AvgOutputAudioMS, _ = avgP95(a.outAudio)
+			s.AvgBargeInStopMS, s.P95BargeInStopMS = avgP95(a.bargeStops)
 		}
 		if mode == ModeTTS {
 			s.AvgTTFAudioMS, s.P95TTFAudioMS = avgP95(a.ttfas)

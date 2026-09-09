@@ -257,3 +257,88 @@ func TestOpenAIS2SServerVAD(t *testing.T) {
 		t.Fatalf("result wrong: %+v", res)
 	}
 }
+
+func TestOpenAIS2SBargeIn(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		c.Write(ctx, websocket.MessageText, []byte(`{"type":"session.created"}`))
+		var audioMsgs int
+		responding := false
+		interrupted := false
+		stop := make(chan struct{})
+		for {
+			_, msg, err := c.Read(ctx)
+			if err != nil {
+				return
+			}
+			var ev struct {
+				Type string `json:"type"`
+			}
+			json.Unmarshal(msg, &ev)
+			if ev.Type != "input_audio_buffer.append" {
+				continue
+			}
+			audioMsgs++
+			var app struct {
+				Audio string `json:"audio"`
+			}
+			json.Unmarshal(msg, &app)
+			raw, _ := base64.StdEncoding.DecodeString(app.Audio)
+			loud := false
+			for _, bb := range raw {
+				if bb != 0 {
+					loud = true
+					break
+				}
+			}
+			if !responding && audioMsgs == 12 {
+				responding = true
+				// VAD fires: stream slow audio deltas until interrupted.
+				go func() {
+					half := base64.StdEncoding.EncodeToString(make([]byte, 2400))
+					for i := 0; i < 100; i++ {
+						select {
+						case <-stop:
+							c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.done"}`))
+							return
+						default:
+						}
+						if c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.output_audio.delta","delta":"`+half+`"}`)) != nil {
+							return
+						}
+						time.Sleep(20 * time.Millisecond)
+					}
+				}()
+			} else if responding && !interrupted && loud {
+				// New speech during the response = barge-in detected.
+				interrupted = true
+				c.Write(ctx, websocket.MessageText, []byte(`{"type":"input_audio_buffer.speech_started"}`))
+				close(stop)
+			}
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("SAYBENCH_OPENAI_S2S_URL", wsURL(srv))
+	clip := loudWAV(t)
+	ps, err := S2SFromSpecsOpts("openai", nil, S2SOpts{TurnEnding: "server_vad", BargeIn: true, BargeClip: clip})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := ps[0].Converse(context.Background(), testWAV(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.BargeInStopMS <= 0 {
+		t.Fatalf("barge-in stop latency not measured: %+v", res)
+	}
+	if res.BargeInStopMS > 5000 {
+		t.Fatalf("stop latency implausible: %+v", res)
+	}
+}

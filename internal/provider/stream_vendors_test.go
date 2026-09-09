@@ -47,6 +47,39 @@ func testWAV(t *testing.T) string {
 
 func wsURL(s *httptest.Server) string { return "ws" + strings.TrimPrefix(s.URL, "http") }
 
+// loudWAV is testWAV with non-silent samples — for mocks that discriminate
+// speech from the silence tail by content, the way a real VAD does.
+func loudWAV(t *testing.T) string {
+	t.Helper()
+	samples := make([]int16, 3200)
+	for i := range samples {
+		samples[i] = int16(1000 + i%500)
+	}
+	var data bytes.Buffer
+	for _, s := range samples {
+		binary.Write(&data, binary.LittleEndian, s)
+	}
+	var b bytes.Buffer
+	b.WriteString("RIFF")
+	binary.Write(&b, binary.LittleEndian, uint32(36+data.Len()))
+	b.WriteString("WAVEfmt ")
+	binary.Write(&b, binary.LittleEndian, uint32(16))
+	binary.Write(&b, binary.LittleEndian, uint16(1))
+	binary.Write(&b, binary.LittleEndian, uint16(1))
+	binary.Write(&b, binary.LittleEndian, uint32(16000))
+	binary.Write(&b, binary.LittleEndian, uint32(32000))
+	binary.Write(&b, binary.LittleEndian, uint16(2))
+	binary.Write(&b, binary.LittleEndian, uint16(16))
+	b.WriteString("data")
+	binary.Write(&b, binary.LittleEndian, uint32(data.Len()))
+	b.Write(data.Bytes())
+	p := filepath.Join(t.TempDir(), "loud.wav")
+	if err := os.WriteFile(p, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func TestDeepgramStreamAgainstLocalServer(t *testing.T) {
 	gotAuth := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
