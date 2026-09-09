@@ -61,7 +61,17 @@ saybench stream -providers fake-stream                              # offline, z
 saybench stream -providers deepgram,openai-realtime,assemblyai -report stream.json
 ```
 
-Streaming vendors: Deepgram live, OpenAI Realtime (transcription intent), AssemblyAI Universal-Streaming — each adapter is exercised in CI against a local WebSocket server speaking that vendor's documented protocol. Every endpoint takes a URL override (`SAYBENCH_DEEPGRAM_STREAM_URL`, `SAYBENCH_OPENAI_REALTIME_URL`, `SAYBENCH_ASSEMBLYAI_STREAM_URL`) so self-hosted or compatible servers bench without code changes.
+Real results, September 2026 — the bundled golden set, fed at real-time pace to the live APIs:
+
+```
+PROVIDER                                CLIPS  ERRORS  WER    KEYTERM RECALL  TTFP AVG  TTFP P95  FINAL LAG AVG  FINAL LAG P95
+deepgram-stream:nova-3                  14     0       4.6%   90.3%           1151ms    1158ms    213ms          235ms
+openai-realtime:gpt-4o-mini-transcribe  14     0       19.4%  67.7%           5633ms    7339ms    753ms          1017ms
+```
+
+**This is the measurement batch mode cannot see.** In batch, these two vendors were ~400ms apart; under streaming, the **time-to-first-partial gap is 5×** (1.15s vs 5.6s avg), and finalization lag — the dead air before your LLM can start thinking — is 3.5× apart. WER stays consistent with batch for both (the digit-vs-spelled formatting artifact included), which is a good consistency check on the pipeline. Configuration note for the OpenAI number: this run used `turn_detection: null` with an explicit end-of-audio commit — the deterministic-measurement setup; server-VAD configurations may pace deltas differently.
+
+Streaming vendors: Deepgram live and OpenAI Realtime (transcription intent) are **live-verified** (the table above); AssemblyAI Universal-Streaming is implemented against its documented protocol and CI-tested, awaiting a live run. Each adapter is exercised in CI against a local WebSocket server speaking that vendor's dialect — the OpenAI one earned its keep on first live contact, catching a beta→GA protocol change. Every endpoint takes a URL override (`SAYBENCH_DEEPGRAM_STREAM_URL`, `SAYBENCH_OPENAI_REALTIME_URL`, `SAYBENCH_ASSEMBLYAI_STREAM_URL`) so self-hosted or compatible servers bench without code changes.
 
 ### Adding your own provider
 
