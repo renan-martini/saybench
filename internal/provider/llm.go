@@ -64,6 +64,14 @@ func FromLLMSpecs(specs string) ([]LLMTarget, error) {
 			out = append(out, NewFakeLLM())
 			continue
 		}
+		if strings.HasPrefix(s, "openai-ws:") {
+			t, err := newOpenAIResponsesWS(strings.TrimPrefix(s, "openai-ws:"))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, t)
+			continue
+		}
 		prov, model := "openai", s
 		if i := strings.Index(s, ":"); i > 0 {
 			if _, known := bases[s[:i]]; known || s[:i] == "custom" {

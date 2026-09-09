@@ -82,3 +82,19 @@ func FormatPct(w float64) string {
 	}
 	return fmt.Sprintf("%.1f%%", w*100)
 }
+
+// ConditionNote returns a human warning when two same-mode reports were
+// measured under different conditions (today: warmup posture). Empty when
+// the comparison is clean.
+func ConditionNote(a, b Report) string {
+	if a.Warmup != b.Warmup {
+		name := func(w bool) string {
+			if w {
+				return "warm (with warmup)"
+			}
+			return "cold (no warmup)"
+		}
+		return fmt.Sprintf("warning: comparing a %s run with a %s run — cold TLS setup is a multi-x TTFT effect; deltas below mix conditions", name(a.Warmup), name(b.Warmup))
+	}
+	return ""
+}

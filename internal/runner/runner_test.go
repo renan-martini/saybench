@@ -88,3 +88,22 @@ func TestRunLLMWithFake(t *testing.T) {
 		t.Fatal("output text not captured")
 	}
 }
+
+type countingTarget struct{ calls int }
+
+func (c *countingTarget) Name() string { return "counting" }
+func (c *countingTarget) Complete(context.Context, provider.ChatPrompt) (provider.LLMResult, error) {
+	c.calls++
+	return provider.LLMResult{Text: "ok", TTFTMS: 1, CompletionMS: 2, OutputTokens: 1}, nil
+}
+
+func TestWarmup(t *testing.T) {
+	ct := &countingTarget{}
+	errs := Warmup(context.Background(), []provider.LLMTarget{ct, provider.NewFakeLLM()}, 0)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected warmup errors: %v", errs)
+	}
+	if ct.calls != 1 {
+		t.Fatalf("warmup calls = %d, want exactly 1", ct.calls)
+	}
+}

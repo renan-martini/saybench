@@ -88,6 +88,10 @@ TARGET    PROMPTS  ERRORS  TTFT AVG  TTFT P95  COMPLETION AVG  TOK/S
 fake-llm  8        0       208ms     273ms     533ms           42.6
 ```
 
+**Warm by default:** every target gets one unmeasured throwaway request before the bench (`-warmup=false` to study cold starts instead) — the first live run showed cold TLS setup is a ~3× TTFT effect, and production voice agents run warm. Reports record which posture was measured, and `compare` warns when a warm run meets a cold one.
+
+**Transport is a dimension:** `openai-ws:gpt-4o-mini` benches the same model over the Responses API's WebSocket mode — one persistent connection per target with prompts serialized over it, because connection reuse is the thing WS mode exists to provide (a fresh socket per prompt would erase what's being measured). Put both transports in one table: `-targets gpt-4o-mini,openai-ws:gpt-4o-mini`. The WS adapter is protocol-tested against a local mock and awaits live verification.
+
 Targets are `[provider:]model` against **any OpenAI-compatible endpoint** — `openai` (default), `openrouter`, `groq`, or `custom` via `SAYBENCH_LLM_BASE_URL` (vLLM, Ollama, self-hosted — no code changes):
 
 ```bash

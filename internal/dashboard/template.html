@@ -160,7 +160,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":
 const runLabel = (r, i) => `#${i + 1} · ${new Date(r.created_at).toISOString().slice(0, 16).replace("T", " ")}`;
 
 document.getElementById("meta").textContent =
-  `${latest.mode || "batch"} mode · ${runs.length} run${runs.length > 1 ? "s" : ""} · generated ${new Date(DATA.generated_at).toISOString().slice(0,16).replace("T"," ")} · v${DATA.version}`;
+  `${latest.mode || "batch"} mode${LLM ? (latest.warmup ? " · warm" : " · cold") : ""} · ${runs.length} run${runs.length > 1 ? "s" : ""} · generated ${new Date(DATA.generated_at).toISOString().slice(0,16).replace("T"," ")} · v${DATA.version}`;
 
 // ---- shared tooltip ----
 const tip = document.getElementById("tip");

@@ -2,13 +2,17 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 func chat(user string) ChatPrompt {
@@ -103,5 +107,88 @@ func TestOpenAICompatibleSurfacesHTTPError(t *testing.T) {
 	tgt := newOpenAICompatible("test", srv.URL, "sk-test", "nope")
 	if _, err := tgt.Complete(context.Background(), chat("x")); err == nil || !strings.Contains(err.Error(), "model not found") {
 		t.Fatalf("error body not surfaced: %v", err)
+	}
+}
+
+func TestOpenAIResponsesWS(t *testing.T) {
+	var conns int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&conns, 1)
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		for {
+			_, msg, err := c.Read(ctx)
+			if err != nil {
+				return
+			}
+			var ev struct {
+				Type            string `json:"type"`
+				Model           string `json:"model"`
+				MaxOutputTokens int    `json:"max_output_tokens"`
+			}
+			json.Unmarshal(msg, &ev)
+			if ev.Type != "response.create" {
+				continue
+			}
+			if ev.Model != "some-model" || ev.MaxOutputTokens <= 0 {
+				c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.failed","response":{"error":{"message":"bad request shape"}}}`))
+				continue
+			}
+			c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.in_progress"}`))
+			time.Sleep(5 * time.Millisecond)
+			c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.output_text.delta","delta":"Our hours"}`))
+			c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.output_text.delta","delta":" are 9 to 5."}`))
+			c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.completed","response":{"usage":{"output_tokens":7}}}`))
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("SAYBENCH_OPENAI_WS_URL", wsURL(srv))
+	ts, err := FromLLMSpecs("openai-ws:some-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgt := ts[0]
+	if tgt.Name() != "openai-ws:some-model" {
+		t.Fatalf("name = %q", tgt.Name())
+	}
+	r1, err := tgt.Complete(context.Background(), chat("hours?"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r1.Text != "Our hours are 9 to 5." || r1.TTFTMS <= 0 || r1.CompletionMS < r1.TTFTMS || r1.OutputTokens != 7 {
+		t.Fatalf("first result wrong: %+v", r1)
+	}
+	// Second prompt must ride the SAME connection — reuse is the semantics.
+	if _, err := tgt.Complete(context.Background(), chat("more hours?")); err != nil {
+		t.Fatal(err)
+	}
+	if n := atomic.LoadInt32(&conns); n != 1 {
+		t.Fatalf("connections = %d, want 1 (persistent connection is the point of WS mode)", n)
+	}
+}
+
+func TestOpenAIResponsesWSSurfacesFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		c.Read(ctx)
+		c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.failed","response":{"error":{"message":"model not available"}}}`))
+	}))
+	defer srv.Close()
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("SAYBENCH_OPENAI_WS_URL", wsURL(srv))
+	ts, _ := FromLLMSpecs("openai-ws:m")
+	if _, err := ts[0].Complete(context.Background(), chat("x")); err == nil || !strings.Contains(err.Error(), "model not available") {
+		t.Fatalf("failure not surfaced: %v", err)
 	}
 }

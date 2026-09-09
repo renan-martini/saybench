@@ -96,15 +96,19 @@ type CategorySummary struct {
 
 // Report is a full benchmark run.
 type Report struct {
-	SchemaVersion int               `json:"schema_version"`
-	Mode          string            `json:"mode,omitempty"` // empty in old files = batch
-	Tool          string            `json:"tool"`
-	ToolVersion   string            `json:"tool_version"`
-	CreatedAt     time.Time         `json:"created_at"`
-	Manifest      string            `json:"manifest"`
-	Summaries     []Summary         `json:"summaries"`
-	Categories    []CategorySummary `json:"categories"`
-	Items         []ItemResult      `json:"items"`
+	SchemaVersion int    `json:"schema_version"`
+	Mode          string `json:"mode,omitempty"` // empty in old files = batch
+	// Warmup records whether targets got an unmeasured throwaway request
+	// before measurement (llm mode). Cold and warm runs are different
+	// experiments; compare warns when they meet.
+	Warmup      bool              `json:"warmup,omitempty"`
+	Tool        string            `json:"tool"`
+	ToolVersion string            `json:"tool_version"`
+	CreatedAt   time.Time         `json:"created_at"`
+	Manifest    string            `json:"manifest"`
+	Summaries   []Summary         `json:"summaries"`
+	Categories  []CategorySummary `json:"categories"`
+	Items       []ItemResult      `json:"items"`
 }
 
 // Build assembles a batch-mode report, computing summaries from items.

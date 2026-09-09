@@ -31,14 +31,14 @@ measure it. Order is intent, not promise.
   and decode tok/s over a voice-agent-shaped prompt set. Third report mode;
   dashboard follows. (WebSocket-transport comparison stays below.)
 
-## Next
+- **v0.7** — **Transport dimension + warmup**: `openai-ws:model` benches the
+  same model over the Responses API WebSocket mode (one persistent
+  connection, prompts serialized — the voice-loop shape); `-warmup` (default
+  on) gives every target an unmeasured first request so TTFT reflects warm
+  connections, recorded in the report, with compare warning on
+  warm-vs-cold.
 
-### 1. LLM transport dimension & connection warmup
-HTTP SSE vs WebSocket for the same model, where the endpoint offers both —
-the comparison that decides how a voice loop should hold its connection.
-Plus a `-warmup` option (one unmeasured request per target before the run):
-the first live run showed cold-vs-warm TLS connections are a ~3x TTFT
-effect, and production voice agents run warm.
+## Next
 
 ### 2. Speech-to-speech (S2S) models
 The field is collapsing STT → LLM → TTS into single speech-native models

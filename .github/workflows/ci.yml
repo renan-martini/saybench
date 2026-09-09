@@ -35,6 +35,8 @@ jobs:
           ./saybench show stream.json | grep -q "INTERIM SURVIVAL"
           if ./saybench compare base.json stream.json; then echo "cross-mode compare must fail" && exit 1; fi
           ./saybench llm -targets fake-llm -prompts llm/golden.jsonl -report llm.json
+          ./saybench llm -targets fake-llm -warmup=false -prompts llm/golden.jsonl -report llmcold.json
+          ./saybench compare llmcold.json llm.json 2>&1 | grep -q "warning: comparing"
           ./saybench show llm.json | grep -q "TTFT"
           ./saybench html -o llmdash.html llm.json
           grep -q "saybench dashboard" llmdash.html

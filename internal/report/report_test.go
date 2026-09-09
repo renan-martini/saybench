@@ -178,3 +178,27 @@ func TestLLMAggregation(t *testing.T) {
 		t.Fatal("llm mode must omit category summaries (they would render WER)")
 	}
 }
+
+func TestWarmupRoundTripAndConditionNote(t *testing.T) {
+	warm := BuildMode("t", "m", ModeLLM, []ItemResult{{Provider: "p", TTFTMS: 1, CompletionMS: 2}})
+	warm.Warmup = true
+	p := filepath.Join(t.TempDir(), "r.json")
+	if err := warm.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Warmup {
+		t.Fatal("warmup flag lost in round trip")
+	}
+	cold := warm
+	cold.Warmup = false
+	if note := ConditionNote(warm, cold); note == "" {
+		t.Fatal("warm-vs-cold comparison must produce a warning note")
+	}
+	if note := ConditionNote(warm, warm); note != "" {
+		t.Fatalf("same-condition note should be empty, got %q", note)
+	}
+}

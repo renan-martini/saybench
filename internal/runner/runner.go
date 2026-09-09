@@ -4,6 +4,7 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -199,6 +200,35 @@ func RunLLM(ctx context.Context, targets []provider.LLMTarget, prompts []manifes
 	close(ch)
 	wg.Wait()
 	return results
+}
+
+// Warmup issues one unmeasured throwaway request per target, so measured
+// TTFT reflects warm connections — the posture production voice loops run
+// in. Errors come back for display as warnings; the measured run surfaces
+// the real failure with full context if a target is actually broken.
+func Warmup(ctx context.Context, targets []provider.LLMTarget, timeout time.Duration) []error {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	var mu sync.Mutex
+	var errs []error
+	var wg sync.WaitGroup
+	for _, t := range targets {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cctx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			_, err := t.Complete(cctx, provider.ChatPrompt{User: "Say ok.", MaxTokens: 5})
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("%s: warmup: %w", t.Name(), err))
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return errs
 }
 
 func runOneLLM(ctx context.Context, t provider.LLMTarget, p manifest.Prompt, timeout time.Duration) report.ItemResult {

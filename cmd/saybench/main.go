@@ -23,7 +23,7 @@ import (
 	"github.com/renan-martini/saybench/internal/runner"
 )
 
-const version = "0.6.0"
+const version = "0.7.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -68,7 +68,7 @@ func usage() {
 Usage:
   saybench stt     -providers fake,deepgram,openai [-manifest golden/manifest.jsonl] [-report out.json] [-format json]
   saybench stream  -providers fake-stream,deepgram,openai-realtime,assemblyai [same flags]
-  saybench llm     -targets fake-llm,gpt-4o-mini,groq:llama-3.3-70b-versatile,openrouter:<model>,custom:<model> [-prompts llm/golden.jsonl]
+  saybench llm     -targets fake-llm,gpt-4o-mini,openai-ws:gpt-4o-mini,groq:<m>,openrouter:<m>,custom:<m> [-warmup=false]
   saybench compare old.json new.json [-max-wer-regression 2.0]
   saybench html    -o dashboard.html run1.json run2.json ...
   saybench show    report.json [-format json]
@@ -225,6 +225,7 @@ func cmdLLM(ctx context.Context, args []string) error {
 	format := fs.String("format", "table", "stdout format: table or json")
 	workers := fs.Int("workers", 4, "concurrent requests")
 	timeout := fs.Duration("timeout", 60*time.Second, "per-prompt timeout")
+	warmup := fs.Bool("warmup", true, "one unmeasured request per target first, so TTFT reflects warm connections (production posture); -warmup=false measures cold starts")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -240,6 +241,12 @@ func cmdLLM(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "saybench: %d prompts × %d targets\n", len(prompts), len(ts))
+	if *warmup {
+		fmt.Fprintln(os.Stderr, "saybench: warming up targets (disable with -warmup=false)")
+		for _, werr := range runner.Warmup(ctx, ts, *timeout) {
+			fmt.Fprintf(os.Stderr, "saybench: warning: %v (continuing — the measured run will show the full error)\n", werr)
+		}
+	}
 	results := runner.RunLLM(ctx, ts, prompts, runner.Options{
 		Workers:     *workers,
 		ItemTimeout: *timeout,
@@ -254,6 +261,7 @@ func cmdLLM(ctx context.Context, args []string) error {
 		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
 	}
 	rep := report.BuildMode(version, *promptsPath, report.ModeLLM, results)
+	rep.Warmup = *warmup
 	switch *format {
 	case "table":
 		printSummary(rep)
@@ -407,6 +415,9 @@ func cmdCompare(args []string) error {
 	}
 	if err := report.CheckComparable(old, new_); err != nil {
 		return err
+	}
+	if note := report.ConditionNote(old, new_); note != "" {
+		fmt.Fprintln(os.Stderr, "saybench:", note)
 	}
 	deltas := report.Compare(old, new_)
 
