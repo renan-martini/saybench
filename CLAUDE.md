@@ -9,8 +9,8 @@ that matter most:
   Example keys in docs are `...`, never realistic-looking values.
 - **Every HTTP call: context deadline + `io.LimitReader`.** No exceptions.
 - **`gofmt -l .`, `go vet ./...`, `go test -race ./...` clean before any commit.**
-- **README examples must be real output**, pasted from an actual run — never
-  hand-written or predicted.
+- **README and docs/ examples must be real output**, pasted from an actual
+  run — never hand-written or predicted.
 - **Honest metrics framing** (batch vs streaming latency, synthetic vs real
   audio) is a product feature. Don't soften or blur it for marketing effect.
 - Golden-set audio must be original: written for this repo and synthesized

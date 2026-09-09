@@ -20,15 +20,16 @@ Thanks for the interest — small, sharp PRs are very welcome. The bar:
 5. **Determinism is a feature.** The fake provider, result ordering, and report
    schema stay stable; breaking the report schema bumps `SchemaVersion`.
 6. **Honest metrics only.** Anything that could mislead (batch latency vs
-   streaming, synthetic vs real audio) gets stated in the README, not buried.
+   streaming, synthetic vs real audio) gets stated in the docs, not buried —
+   the doctrine lives in [docs/scoring.md](docs/scoring.md).
 
 ## Adding a provider
 
 One file in `internal/provider/` implementing `Name()` and
 `Transcribe(ctx, audioPath)`, wired into `FromSpecs`. Follow `deepgram.go` as
 the template: env-only key via `requireEnv`, `newHTTPClient()`, bounded reads,
-error snippets capped by `snippet()`. Include the env var names in the README
-providers table.
+error snippets capped by `snippet()`. Include the env var names in the
+providers table in [docs/providers.md](docs/providers.md).
 
 ## Style
 
