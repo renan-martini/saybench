@@ -148,7 +148,7 @@ Adding a provider is one file implementing a two-method interface — see `inter
 
 ## Roadmap
 
-The detailed plan lives in [ROADMAP.md](ROADMAP.md). Headlines: streaming STT latency, TTS time-to-first-audio, LLM time-to-first-token against any OpenAI-compatible endpoint, an MCP server mode so coding agents can run benchmarks natively, a Pipecat adapter, and cost-per-hour columns.
+The detailed plan lives in [ROADMAP.md](ROADMAP.md). Headlines: LLM time-to-first-token against any OpenAI-compatible endpoint, **speech-to-speech model benchmarking** (voice-to-voice latency, then comprehension scoring via echo elicitation), TTS time-to-first-audio, an MCP server mode so coding agents can run benchmarks natively, a Pipecat adapter, and cost-per-hour columns.
 
 ## Design principles
 
