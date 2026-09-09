@@ -265,7 +265,7 @@ Adding a provider is one file implementing a two-method interface — see `inter
 
 - **WER is corpus-level** (total edits ÷ total reference words), with per-clip substitution/deletion/insertion breakdowns in the JSON report — a score you can debug, not just rank by.
 - **Both sides are normalized** (case, punctuation) before scoring, so vendor formatting choices don't count as errors.
-- **Digit formatting is a choice, not a surprise**: `-normalize digits` canonicalizes digit strings against spelled-out digits ("4739028" ≡ "four seven three nine zero two eight") before scoring — opt-in, recorded on the report, warned about in `compare` when runs mix normalizations. Full number semantics ("$247.63" vs "two hundred forty seven dollars") stays out of scope, and the flag's docs say so.
+- **Digit formatting is a choice, not a surprise**: `-normalize digits` canonicalizes digit strings against spelled-out digits ("4739028" ≡ "four seven three nine zero two eight") before scoring — opt-in, recorded on the report, warned about in `compare` when runs mix normalizations. Full number semantics ("$247.63" vs "two hundred forty seven dollars") stays out of scope, and the flag's docs say so. Rescoring this README's own published runs with it: `gpt-4o-mini-transcribe` drops from 19.0% to **12.2%** (a third of its "errors" were formatting), the S2S echo run from 27.0% to 20.7%, and `nova-3` from 3.8% to 3.0%.
 - **Latency here is batch-API round-trip** including upload — comparable across providers, but *not* the same as streaming time-to-first-token. Streaming latency is on the roadmap and will be reported separately, never blended.
 
 ## Roadmap
