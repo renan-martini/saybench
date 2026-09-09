@@ -31,19 +31,19 @@ func TestFakeS2SDeterministic(t *testing.T) {
 }
 
 func TestS2SFromSpecs(t *testing.T) {
-	ps, err := S2SFromSpecs("fake-s2s", map[string]string{})
+	ps, err := S2SFromSpecs("fake-s2s", map[string]string{}, false)
 	if err != nil || len(ps) != 1 || ps[0].Name() != "fake-s2s" {
 		t.Fatalf("S2SFromSpecs = %v, %v", ps, err)
 	}
-	if _, err := S2SFromSpecs("bogus", nil); err == nil {
+	if _, err := S2SFromSpecs("bogus", nil, false); err == nil {
 		t.Fatal("expected unknown provider error")
 	}
 	t.Setenv("OPENAI_API_KEY", "")
-	if _, err := S2SFromSpecs("openai", nil); err == nil {
+	if _, err := S2SFromSpecs("openai", nil, false); err == nil {
 		t.Fatal("expected missing key error")
 	}
 	t.Setenv("SAYBENCH_S2S_URL", "")
-	if _, err := S2SFromSpecs("custom", nil); err == nil {
+	if _, err := S2SFromSpecs("custom", nil, false); err == nil {
 		t.Fatal("expected missing SAYBENCH_S2S_URL error")
 	}
 }
@@ -115,7 +115,7 @@ func TestOpenAIS2SAgainstLocalServer(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("SAYBENCH_OPENAI_S2S_URL", wsURL(srv))
-	ps, err := S2SFromSpecs("openai", nil)
+	ps, err := S2SFromSpecs("openai", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,8 +153,34 @@ func TestOpenAIS2SSurfacesServerError(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("SAYBENCH_OPENAI_S2S_URL", wsURL(srv))
-	ps, _ := S2SFromSpecs("openai", nil)
+	ps, _ := S2SFromSpecs("openai", nil, false)
 	if _, err := ps[0].Converse(context.Background(), testWAV(t)); err == nil || !strings.Contains(err.Error(), "insufficient quota") {
 		t.Fatalf("server error not surfaced: %v", err)
+	}
+}
+
+func TestFakeS2SEchoMode(t *testing.T) {
+	refs := map[string]string{"/a.wav": "one two three four five six seven eight nine ten eleven twelve"}
+	f := NewFakeS2S(refs)
+	f.Echo = true
+	r, err := f.Converse(context.Background(), "/a.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Transcript == refs["/a.wav"] {
+		t.Fatal("fake echo must be imperfect (deterministic mangle)")
+	}
+	if !strings.Contains(r.Transcript, "one two three") {
+		t.Fatalf("fake echo should largely repeat the reference: %q", r.Transcript)
+	}
+}
+
+func TestS2SFromSpecsEchoInstructions(t *testing.T) {
+	ps, err := S2SFromSpecs("fake-s2s", map[string]string{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, ok := ps[0].(*FakeS2S); !ok || !f.Echo {
+		t.Fatal("echo flag must reach the fake provider")
 	}
 }

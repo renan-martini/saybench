@@ -227,3 +227,22 @@ func TestS2SAggregation(t *testing.T) {
 		t.Fatal("s2s mode must omit category summaries (they would render WER)")
 	}
 }
+
+func TestS2SScoringConditionAndSentinel(t *testing.T) {
+	conv := BuildMode("t", "m", ModeS2S, []ItemResult{{Provider: "p", V2VFirstAudioMS: 500}})
+	conv.S2SScoring = "conversational"
+	if conv.Summaries[0].WER != -1 {
+		t.Fatalf("unscored s2s WER = %v, want -1 sentinel", conv.Summaries[0].WER)
+	}
+	echo := BuildMode("t", "m", ModeS2S, []ItemResult{{Provider: "p", V2VFirstAudioMS: 500, Sub: 1, RefWords: 10, KeytermsHit: 1, KeytermsTotal: 2}})
+	echo.S2SScoring = "echo"
+	if echo.Summaries[0].WER != 0.1 || echo.Summaries[0].KeytermRecall != 0.5 {
+		t.Fatalf("echo aggregation wrong: %+v", echo.Summaries[0])
+	}
+	if note := ConditionNote(conv, echo); note == "" {
+		t.Fatal("conversational-vs-echo compare must warn")
+	}
+	if note := ConditionNote(echo, echo); note != "" {
+		t.Fatalf("same condition must not warn: %q", note)
+	}
+}

@@ -128,3 +128,35 @@ func TestRunS2SWithFake(t *testing.T) {
 		t.Fatalf("s2s fields wrong: %+v", r)
 	}
 }
+
+func TestRunS2SEchoScores(t *testing.T) {
+	dir := t.TempDir()
+	audio := filepath.Join(dir, "clip.wav")
+	os.WriteFile(audio, []byte("x"), 0o644)
+	items := []manifest.Item{{
+		Audio:     audio,
+		Reference: "one two three four five six seven eight nine ten",
+		Category:  "numbers",
+		Keyterms:  []string{"nine ten", "zzz-not-said"},
+	}}
+	refs := map[string]string{audio: items[0].Reference}
+	f := provider.NewFakeS2S(refs)
+	f.Echo = true
+	results := RunS2S(context.Background(), []provider.S2SProvider{f}, items, Options{Workers: 1, EchoScore: true})
+	r := results[0]
+	if r.Error != "" {
+		t.Fatalf("unexpected error: %s", r.Error)
+	}
+	if r.WER <= 0 || r.WER >= 1 || r.RefWords != 10 {
+		t.Fatalf("echo WER not scored: %+v", r)
+	}
+	if r.KeytermsTotal != 2 || r.KeytermsHit != 1 {
+		t.Fatalf("echo keyterms wrong: %+v", r)
+	}
+	// Latency-only run must NOT score.
+	f2 := provider.NewFakeS2S(refs)
+	conv := RunS2S(context.Background(), []provider.S2SProvider{f2}, items, Options{Workers: 1})
+	if conv[0].RefWords != 0 || conv[0].KeytermsTotal != 0 {
+		t.Fatalf("conversational run must not score: %+v", conv[0])
+	}
+}

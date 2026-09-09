@@ -87,6 +87,9 @@ func FormatPct(w float64) string {
 // measured under different conditions (today: warmup posture). Empty when
 // the comparison is clean.
 func ConditionNote(a, b Report) string {
+	if a.S2SScoring != b.S2SScoring && (a.S2SScoring != "" || b.S2SScoring != "") {
+		return fmt.Sprintf("warning: comparing a %q s2s run with a %q s2s run — the tasks differ (echo replies are short and scored; conversational replies are free-form), so latency and speech-out deltas mix conditions", orConv(a.S2SScoring), orConv(b.S2SScoring))
+	}
 	if a.Warmup != b.Warmup {
 		name := func(w bool) string {
 			if w {
@@ -97,4 +100,11 @@ func ConditionNote(a, b Report) string {
 		return fmt.Sprintf("warning: comparing a %s run with a %s run — cold TLS setup is a multi-x TTFT effect; deltas below mix conditions", name(a.Warmup), name(b.Warmup))
 	}
 	return ""
+}
+
+func orConv(s string) string {
+	if s == "" {
+		return "conversational"
+	}
+	return s
 }

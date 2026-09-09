@@ -41,6 +41,9 @@ jobs:
           ./saybench show s2s.json | grep -q "V2V FIRST AUDIO"
           ./saybench html -o s2sdash.html s2s.json
           grep -q "saybench dashboard" s2sdash.html
+          ./saybench s2s -providers fake-s2s -score echo -manifest golden/manifest.jsonl -report s2secho.json
+          ./saybench show s2secho.json | grep -q "ECHO WER"
+          ./saybench compare s2s.json s2secho.json 2>&1 | grep -q "tasks differ"
           ./saybench show llm.json | grep -q "TTFT"
           ./saybench html -o llmdash.html llm.json
           grep -q "saybench dashboard" llmdash.html

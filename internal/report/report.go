@@ -111,7 +111,11 @@ type Report struct {
 	// Warmup records whether targets got an unmeasured throwaway request
 	// before measurement (llm mode). Cold and warm runs are different
 	// experiments; compare warns when they meet.
-	Warmup      bool              `json:"warmup,omitempty"`
+	Warmup bool `json:"warmup,omitempty"`
+	// S2SScoring records the s2s task condition: "conversational" (latency
+	// only) or "echo" (comprehension-scored). Different experiments;
+	// compare warns when they meet.
+	S2SScoring  string            `json:"s2s_scoring,omitempty"`
 	Tool        string            `json:"tool"`
 	ToolVersion string            `json:"tool_version"`
 	CreatedAt   time.Time         `json:"created_at"`
@@ -188,8 +192,10 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 
 	rate := func(a *agg) float64 {
 		if a.words == 0 {
-			if a.errs > 0 {
-				return -1 // nothing scored — do not report a perfect 0%
+			if a.errs > 0 || mode == ModeS2S {
+				// Nothing was scored (errors, or an unscored s2s
+				// condition) — never report a perfect 0%.
+				return -1
 			}
 			return 0
 		}

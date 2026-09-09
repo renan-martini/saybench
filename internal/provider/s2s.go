@@ -6,6 +6,8 @@ import (
 	"hash/fnv"
 	"os"
 	"strings"
+
+	"github.com/renan-martini/saybench/internal/wer"
 )
 
 // S2SResult is one speech-to-speech turn's outcome.
@@ -34,7 +36,11 @@ type S2SProvider interface {
 // SAYBENCH_S2S_URL (+ SAYBENCH_S2S_API_KEY, SAYBENCH_S2S_MODEL) — emerging
 // S2S vendors clone that dialect the way everyone cloned chat completions;
 // anything that doesn't is a small adapter behind S2SProvider.
-func S2SFromSpecs(specs string, refs map[string]string) ([]S2SProvider, error) {
+// echoInstructions is the fixed phase-2 task. Fixed deliberately:
+// comparability across runs and vendors depends on the task being identical.
+const echoInstructions = "Repeat back exactly, word for word, what the caller just said. Say nothing else — no acknowledgment, no commentary."
+
+func S2SFromSpecs(specs string, refs map[string]string, echo bool) ([]S2SProvider, error) {
 	var out []S2SProvider
 	seen := map[string]bool{}
 	for _, s := range strings.Split(specs, ",") {
@@ -47,7 +53,9 @@ func S2SFromSpecs(specs string, refs map[string]string) ([]S2SProvider, error) {
 		case "":
 			continue
 		case "fake-s2s":
-			out = append(out, NewFakeS2S(refs))
+			f := NewFakeS2S(refs)
+			f.Echo = echo
+			out = append(out, f)
 		case "openai":
 			key, err := requireEnv("OPENAI_API_KEY")
 			if err != nil {
@@ -61,14 +69,22 @@ func S2SFromSpecs(specs string, refs map[string]string) ([]S2SProvider, error) {
 			if base == "" {
 				base = "wss://api.openai.com/v1/realtime"
 			}
-			out = append(out, newRealtimeS2S("openai:"+model, base, key, model))
+			p := newRealtimeS2S("openai:"+model, base, key, model)
+			if echo {
+				p.instructions = echoInstructions
+			}
+			out = append(out, p)
 		case "custom":
 			base := os.Getenv("SAYBENCH_S2S_URL")
 			if base == "" {
 				return nil, fmt.Errorf("custom s2s target needs SAYBENCH_S2S_URL (an OpenAI-Realtime-dialect endpoint)")
 			}
 			model := os.Getenv("SAYBENCH_S2S_MODEL")
-			out = append(out, newRealtimeS2S("custom:"+model, base, os.Getenv("SAYBENCH_S2S_API_KEY"), model))
+			p := newRealtimeS2S("custom:"+model, base, os.Getenv("SAYBENCH_S2S_API_KEY"), model)
+			if echo {
+				p.instructions = echoInstructions
+			}
+			out = append(out, p)
 		default:
 			return nil, fmt.Errorf("unknown s2s provider %q (known: fake-s2s, openai, custom)", s)
 		}
@@ -82,6 +98,9 @@ func S2SFromSpecs(specs string, refs map[string]string) ([]S2SProvider, error) {
 // FakeS2S is the offline deterministic provider for CI and demos.
 type FakeS2S struct {
 	refs map[string]string
+	// Echo makes the fake repeat the reference (with its deterministic
+	// mangle) instead of replying conversationally.
+	Echo bool
 }
 
 func NewFakeS2S(refs map[string]string) *FakeS2S { return &FakeS2S{refs: refs} }
@@ -96,8 +115,23 @@ func (f *FakeS2S) Converse(_ context.Context, audioPath string) (S2SResult, erro
 	if ref == "" {
 		ref = "that"
 	}
+	transcript := fmt.Sprintf("Sure — let me help with %s.", firstWords(ref, 4))
+	if f.Echo {
+		words := wer.Normalize(ref)
+		var out []string
+		for i, w := range words {
+			switch {
+			case (i+1)%8 == 0:
+			case (i+1)%11 == 0:
+				out = append(out, "um")
+			default:
+				out = append(out, w)
+			}
+		}
+		transcript = strings.Join(out, " ")
+	}
 	return S2SResult{
-		Transcript:      fmt.Sprintf("Sure — let me help with %s.", firstWords(ref, 4)),
+		Transcript:      transcript,
 		V2VFirstAudioMS: int(300 + n%400),
 		ResponseDoneMS:  int(1500 + n%1000),
 		OutputAudioMS:   int(900 + n%800),

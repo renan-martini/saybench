@@ -161,7 +161,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":
 const runLabel = (r, i) => `#${i + 1} · ${new Date(r.created_at).toISOString().slice(0, 16).replace("T", " ")}`;
 
 document.getElementById("meta").textContent =
-  `${MODE} mode${LLM ? (latest.warmup ? " · warm" : " · cold") : ""} · ${runs.length} run${runs.length > 1 ? "s" : ""} · generated ${new Date(DATA.generated_at).toISOString().slice(0,16).replace("T"," ")} · v${DATA.version}`;
+  `${MODE} mode${LLM ? (latest.warmup ? " · warm" : " · cold") : ""}${S2S ? " · " + (latest.s2s_scoring || "conversational") : ""} · ${runs.length} run${runs.length > 1 ? "s" : ""} · generated ${new Date(DATA.generated_at).toISOString().slice(0,16).replace("T"," ")} · v${DATA.version}`;
 
 // ---- shared tooltip ----
 const tip = document.getElementById("tip");
@@ -181,14 +181,14 @@ function bindTips(root) {
 // ---- latest-run summary table ----
 {
   const latCols = S2S
-    ? s => `<td class="mono">${s.avg_v2v_first_audio_ms || 0}ms</td><td class="mono">${s.p95_v2v_first_audio_ms || 0}ms</td><td class="mono">${s.avg_response_done_ms || 0}ms</td><td class="mono">${s.avg_output_audio_ms || 0}ms</td>`
+    ? s => `<td class="mono">${pct(s.wer)}</td><td class="mono">${pct(s.keyterm_recall)}</td><td class="mono">${s.avg_v2v_first_audio_ms || 0}ms</td><td class="mono">${s.p95_v2v_first_audio_ms || 0}ms</td><td class="mono">${s.avg_response_done_ms || 0}ms</td><td class="mono">${s.avg_output_audio_ms || 0}ms</td>`
     : LLM
     ? s => `<td class="mono">${s.avg_ttft_ms || 0}ms</td><td class="mono">${s.p95_ttft_ms || 0}ms</td><td class="mono">${s.avg_completion_ms || 0}ms</td><td class="mono">${(s.avg_tokens_per_sec || 0).toFixed(1)}</td>`
     : STREAMING
     ? s => `<td class="mono">${pct(s.wer)}</td><td class="mono">${pct(s.keyterm_recall)}</td><td class="mono">${s.avg_ttf_partial_ms || 0}ms</td><td class="mono">${s.avg_final_lag_ms || 0}ms</td><td class="mono">${pct(s.interim_word_survival == null ? -1 : s.interim_word_survival)}</td>`
     : s => `<td class="mono">${pct(s.wer)}</td><td class="mono">${pct(s.keyterm_recall)}</td><td class="mono">${s.avg_latency_ms}ms</td><td class="mono">${s.p95_latency_ms}ms</td>`;
   const latHead = S2S
-    ? "<th>v2v first audio</th><th>v2v p95</th><th>response done</th><th>speech out</th>"
+    ? "<th>echo wer</th><th>keyterm recall</th><th>v2v first audio</th><th>v2v p95</th><th>response done</th><th>speech out</th>"
     : LLM
     ? "<th>ttft avg</th><th>ttft p95</th><th>completion avg</th><th>tok/s</th>"
     : STREAMING

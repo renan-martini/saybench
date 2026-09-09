@@ -19,6 +19,9 @@ type Options struct {
 	Workers     int           // concurrent transcriptions (default 4)
 	ItemTimeout time.Duration // per-clip deadline (default 60s)
 	Progress    func(done, total int)
+	// EchoScore turns on comprehension scoring for s2s echo runs: the
+	// model's reply transcript is scored against the clip's reference.
+	EchoScore bool
 }
 
 // Run benchmarks every provider against every item. Item order in the result
@@ -261,7 +264,7 @@ func RunS2S(ctx context.Context, providers []provider.S2SProvider, items []manif
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				results[j.idx] = runOneS2S(ctx, j.p, j.item, opts.ItemTimeout)
+				results[j.idx] = runOneS2S(ctx, j.p, j.item, opts.ItemTimeout, opts.EchoScore)
 				if opts.Progress != nil {
 					mu.Lock()
 					done++
@@ -279,7 +282,7 @@ func RunS2S(ctx context.Context, providers []provider.S2SProvider, items []manif
 	return results
 }
 
-func runOneS2S(ctx context.Context, p provider.S2SProvider, it manifest.Item, timeout time.Duration) report.ItemResult {
+func runOneS2S(ctx context.Context, p provider.S2SProvider, it manifest.Item, timeout time.Duration, echoScore bool) report.ItemResult {
 	res := report.ItemResult{Provider: p.Name(), Audio: it.Audio, Category: it.Category, Reference: it.Reference}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -292,6 +295,17 @@ func runOneS2S(ctx context.Context, p provider.S2SProvider, it manifest.Item, ti
 	res.V2VFirstAudioMS = out.V2VFirstAudioMS
 	res.ResponseDoneMS = out.ResponseDoneMS
 	res.OutputAudioMS = out.OutputAudioMS
+	if echoScore {
+		c := wer.Compute(it.Reference, out.Transcript)
+		res.Sub, res.Del, res.Ins, res.RefWords = c.Sub, c.Del, c.Ins, c.RefWords
+		res.WER = c.WER()
+		if len(it.Keyterms) > 0 {
+			hit, missed := wer.KeytermHits(out.Transcript, it.Keyterms)
+			res.KeytermsTotal = len(it.Keyterms)
+			res.KeytermsHit = len(hit)
+			res.MissedKeyterms = missed
+		}
+	}
 	return res
 }
 

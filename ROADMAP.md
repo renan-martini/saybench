@@ -31,6 +31,9 @@ measure it. Order is intent, not promise.
   and decode tok/s over a voice-agent-shaped prompt set. Third report mode;
   dashboard follows. (WebSocket-transport comparison stays below.)
 
+- **v0.9** — **S2S phase 2**: `-score echo` — the repeat-back task, scored
+  with WER + keyterm recall against the model's own reply transcript;
+  echo vs conversational recorded as a compare-warned condition.
 - **v0.8** — **S2S phase 1**: `saybench s2s` measures voice-to-voice
   latency (turn end → first output audio), response-done time, and speech-out
   duration against speech-to-speech models — OpenAI Realtime today, any
@@ -46,11 +49,10 @@ measure it. Order is intent, not promise.
 
 ## Next
 
-### S2S phase 2 — comprehension via echo elicitation
-Instruct the session to repeat back verbatim what it heard, then score the
-model's own reply transcript with the existing WER + keyterm machinery —
-turning the golden set into an S2S comprehension benchmark. Plus: server-VAD
-posture as a labeled dimension, barge-in latency, and a Gemini Live adapter.
+### S2S follow-ups
+Server-VAD posture as a labeled dimension, barge-in latency, and a Gemini
+Live adapter. (Phase 2 — echo-elicitation comprehension scoring — shipped
+in v0.9.)
 
 ### 3. TTS time-to-first-audio
 The other half of response latency: how long from send to the first audible
