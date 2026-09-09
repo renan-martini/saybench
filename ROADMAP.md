@@ -33,9 +33,12 @@ measure it. Order is intent, not promise.
 
 ## Next
 
-### 1. LLM transport dimension
+### 1. LLM transport dimension & connection warmup
 HTTP SSE vs WebSocket for the same model, where the endpoint offers both —
 the comparison that decides how a voice loop should hold its connection.
+Plus a `-warmup` option (one unmeasured request per target before the run):
+the first live run showed cold-vs-warm TLS connections are a ~3x TTFT
+effect, and production voice agents run warm.
 
 ### 2. Speech-to-speech (S2S) models
 The field is collapsing STT → LLM → TTS into single speech-native models

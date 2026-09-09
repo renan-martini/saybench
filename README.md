@@ -94,6 +94,15 @@ Targets are `[provider:]model` against **any OpenAI-compatible endpoint** — `o
 saybench llm -targets gpt-4o-mini,groq:llama-3.3-70b-versatile,openrouter:google/gemini-2.5-flash -report llm.json
 ```
 
+Real results, September 2026 — the bundled prompt set against the live API:
+
+```
+TARGET              PROMPTS  ERRORS  TTFT AVG  TTFT P95  COMPLETION AVG  TOK/S
+openai:gpt-4o-mini  8        0       1109ms    1885ms    1271ms          115.2
+```
+
+Two honest readings of that table. First, **TTFT dominates**: completion lands only ~160ms after the first token at voice-turn lengths — the wait is almost entirely time-to-first-token, which is why it's the headline column. Second, a methodological finding the per-prompt data exposed: TTFT was **bimodal (~1.7s vs ~500ms), splitting exactly along worker waves** — the first four concurrent requests paid cold TLS connection setup, the second four reused warm connections. Real voice agents hold connections warm, so a `-warmup` option (one unmeasured request per target first) is on the roadmap; until then, read cold-start p95s knowing what's in them. Benchmarks that don't tell you this are lying with averages.
+
 The bundled `llm/golden.jsonl` is voice-agent-shaped — short system prompts, brief histories, disfluent user turns, small token caps — because that's the workload a conversation loop actually runs, not essay generation. Latency only, by design: outputs are captured in the report for reading, and quality judging is a separate roadmap item rather than a half-measure bolted onto a latency bench.
 
 ## The dashboard
