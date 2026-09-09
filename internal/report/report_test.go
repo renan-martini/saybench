@@ -149,3 +149,32 @@ func TestInterimSurvivalAggregation(t *testing.T) {
 		t.Fatalf("q survival = %v, want -1 sentinel", r.Summaries[1].InterimWordSurvival)
 	}
 }
+
+func TestLLMAggregation(t *testing.T) {
+	items := []ItemResult{
+		{Provider: "openai:gpt-4o-mini", Prompt: "greet", Category: "greeting", TTFTMS: 200, CompletionMS: 600, OutputTokens: 20},
+		{Provider: "openai:gpt-4o-mini", Prompt: "faq", Category: "faq", TTFTMS: 400, CompletionMS: 1000, OutputTokens: 30},
+		{Provider: "openai:gpt-4o-mini", Prompt: "err", Error: "boom"},
+	}
+	r := BuildMode("t", "llm/golden.jsonl", ModeLLM, items)
+	if r.Mode != ModeLLM {
+		t.Fatalf("mode = %q", r.Mode)
+	}
+	s := r.Summaries[0]
+	if s.AvgTTFTMS != 300 || s.P95TTFTMS != 400 {
+		t.Fatalf("ttft agg wrong: %+v", s)
+	}
+	if s.AvgCompletionMS != 800 {
+		t.Fatalf("completion agg wrong: %+v", s)
+	}
+	// tok/s over the decode window: (20/(0.6-0.2)) and (30/(1.0-0.4)) -> avg of 50 and 50 = 50
+	if s.AvgTokensPerSec < 49.9 || s.AvgTokensPerSec > 50.1 {
+		t.Fatalf("tok/s = %v, want ~50", s.AvgTokensPerSec)
+	}
+	if s.Errors != 1 || s.Items != 3 {
+		t.Fatalf("counts wrong: %+v", s)
+	}
+	if len(r.Categories) != 0 {
+		t.Fatal("llm mode must omit category summaries (they would render WER)")
+	}
+}

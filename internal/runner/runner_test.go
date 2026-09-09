@@ -70,3 +70,21 @@ func TestRunStreamWithFake(t *testing.T) {
 		t.Fatalf("interim survival not scored (want 0 < hit < total): %+v", r)
 	}
 }
+
+func TestRunLLMWithFake(t *testing.T) {
+	prompts := []manifest.Prompt{{Name: "greet", User: "hello there", Category: "greeting", MaxTokens: 60}}
+	results := RunLLM(context.Background(), []provider.LLMTarget{provider.NewFakeLLM()}, prompts, Options{Workers: 2})
+	if len(results) != 1 {
+		t.Fatalf("got %d results", len(results))
+	}
+	r := results[0]
+	if r.Error != "" {
+		t.Fatalf("unexpected error: %s", r.Error)
+	}
+	if r.Prompt != "greet" || r.Category != "greeting" || r.TTFTMS <= 0 || r.CompletionMS <= 0 || r.OutputTokens <= 0 {
+		t.Fatalf("llm fields wrong: %+v", r)
+	}
+	if r.Hypothesis == "" {
+		t.Fatal("output text not captured")
+	}
+}

@@ -20,6 +20,7 @@ const SchemaVersion = 1
 const (
 	ModeBatch     = "batch"
 	ModeStreaming = "streaming"
+	ModeLLM       = "llm"
 )
 
 // ItemResult is one (provider, clip) outcome.
@@ -43,6 +44,11 @@ type ItemResult struct {
 	// interim previewed. Zero totals mean "no interims" — not a bad score.
 	InterimSurvivalHit   int `json:"interim_survival_hit,omitempty"`
 	InterimSurvivalTotal int `json:"interim_survival_total,omitempty"`
+	// LLM-mode fields.
+	Prompt       string `json:"prompt,omitempty"` // scenario name
+	TTFTMS       int    `json:"ttft_ms,omitempty"`
+	CompletionMS int    `json:"completion_ms,omitempty"`
+	OutputTokens int    `json:"output_tokens,omitempty"`
 	// Keyterm recall: of the clip's important terms, how many survived
 	// transcription intact. MissedKeyterms names the casualties.
 	KeytermsTotal  int      `json:"keyterms_total,omitempty"`
@@ -73,6 +79,11 @@ type Summary struct {
 	P95TTFPartialMS     int64   `json:"p95_ttf_partial_ms,omitempty"`
 	AvgFinalLagMS       int64   `json:"avg_final_lag_ms,omitempty"`
 	P95FinalLagMS       int64   `json:"p95_final_lag_ms,omitempty"`
+	// LLM-mode aggregates.
+	AvgTTFTMS       int64   `json:"avg_ttft_ms,omitempty"`
+	P95TTFTMS       int64   `json:"p95_ttft_ms,omitempty"`
+	AvgCompletionMS int64   `json:"avg_completion_ms,omitempty"`
+	AvgTokensPerSec float64 `json:"avg_tokens_per_sec,omitempty"`
 }
 
 // CategorySummary aggregates one provider within one failure-mode category.
@@ -109,6 +120,8 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 		survHit, survTotal    int
 		latencies             []int64
 		ttfps, lags           []int64
+		ttfts, completions    []int64
+		tokRates              []float64
 	}
 	byProvider := map[string]*agg{}
 	type catKey struct{ p, c string }
@@ -142,6 +155,14 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 				x.survHit += it.InterimSurvivalHit
 				x.survTotal += it.InterimSurvivalTotal
 			}
+			if mode == ModeLLM {
+				x.ttfts = append(x.ttfts, int64(it.TTFTMS))
+				x.completions = append(x.completions, int64(it.CompletionMS))
+				if it.OutputTokens > 0 && it.CompletionMS > it.TTFTMS {
+					decode := float64(it.CompletionMS-it.TTFTMS) / 1000
+					x.tokRates = append(x.tokRates, float64(it.OutputTokens)/decode)
+				}
+			}
 		}
 	}
 
@@ -174,11 +195,25 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 				s.InterimWordSurvival = float64(a.survHit) / float64(a.survTotal)
 			}
 		}
+		if mode == ModeLLM {
+			s.AvgTTFTMS, s.P95TTFTMS = avgP95(a.ttfts)
+			s.AvgCompletionMS, _ = avgP95(a.completions)
+			if len(a.tokRates) > 0 {
+				var sum float64
+				for _, r := range a.tokRates {
+					sum += r
+				}
+				s.AvgTokensPerSec = sum / float64(len(a.tokRates))
+			}
+		}
 		summaries = append(summaries, s)
 	}
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Provider < summaries[j].Provider })
 
 	var cats []CategorySummary
+	if mode == ModeLLM {
+		byCat = nil // per-category WER does not exist here; item rows keep categories
+	}
 	for k, a := range byCat {
 		cats = append(cats, CategorySummary{Provider: k.p, Category: k.c, Items: a.n, WER: rate(a)})
 	}

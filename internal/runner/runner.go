@@ -153,6 +153,74 @@ func runOneStream(ctx context.Context, p provider.StreamingProvider, it manifest
 	return res
 }
 
+// RunLLM benchmarks LLM targets against a prompt set: same fan-out pattern,
+// latency-only scoring (see the llm-bench design spec).
+func RunLLM(ctx context.Context, targets []provider.LLMTarget, prompts []manifest.Prompt, opts Options) []report.ItemResult {
+	if opts.Workers <= 0 {
+		opts.Workers = 4
+	}
+	if opts.ItemTimeout <= 0 {
+		opts.ItemTimeout = 60 * time.Second
+	}
+	type job struct {
+		t   provider.LLMTarget
+		p   manifest.Prompt
+		idx int
+	}
+	jobs := make([]job, 0, len(targets)*len(prompts))
+	for _, t := range targets {
+		for _, p := range prompts {
+			jobs = append(jobs, job{t: t, p: p, idx: len(jobs)})
+		}
+	}
+	results := make([]report.ItemResult, len(jobs))
+	ch := make(chan job)
+	var done int
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for range opts.Workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range ch {
+				results[j.idx] = runOneLLM(ctx, j.t, j.p, opts.ItemTimeout)
+				if opts.Progress != nil {
+					mu.Lock()
+					done++
+					opts.Progress(done, len(jobs))
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	for _, j := range jobs {
+		ch <- j
+	}
+	close(ch)
+	wg.Wait()
+	return results
+}
+
+func runOneLLM(ctx context.Context, t provider.LLMTarget, p manifest.Prompt, timeout time.Duration) report.ItemResult {
+	res := report.ItemResult{Provider: t.Name(), Prompt: p.Name, Category: p.Category}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	hist := make([][2]string, 0, len(p.History))
+	for _, m := range p.History {
+		hist = append(hist, [2]string{m.Role, m.Content})
+	}
+	out, err := t.Complete(cctx, provider.ChatPrompt{System: p.System, History: hist, User: p.User, MaxTokens: p.MaxTokens})
+	if err != nil {
+		res.Error = err.Error()
+		return res
+	}
+	res.Hypothesis = out.Text
+	res.TTFTMS = out.TTFTMS
+	res.CompletionMS = out.CompletionMS
+	res.OutputTokens = out.OutputTokens
+	return res
+}
+
 func runOne(ctx context.Context, p provider.Provider, it manifest.Item, timeout time.Duration) report.ItemResult {
 	res := report.ItemResult{
 		Provider:  p.Name(),

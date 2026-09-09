@@ -77,6 +77,25 @@ Streaming vendors: Deepgram live and OpenAI Realtime (transcription intent) are 
 
 Implement two methods — `Name()` and `StreamTranscribe(ctx, audioPath)` (or `Transcribe` for batch) — and register the spec string. `internal/provider/assemblyai_stream.go` is the smallest streaming template: dial, feed paced chunks via the shared `feed` helper, map the vendor's interim/final messages onto the shared `collector`, done. PRs welcome; the protocol test pattern in `stream_vendors_test.go` is the contract.
 
+## LLM mode: the turn the voice loop waits on
+
+After STT finalizes, nothing happens until the LLM's first token — TTS can't start speaking. `saybench llm` streams chat completions and measures **time-to-first-token**, completion time, and decode speed, per prompt and aggregated:
+
+```
+$ saybench llm -targets fake-llm
+
+TARGET    PROMPTS  ERRORS  TTFT AVG  TTFT P95  COMPLETION AVG  TOK/S
+fake-llm  8        0       208ms     273ms     533ms           42.6
+```
+
+Targets are `[provider:]model` against **any OpenAI-compatible endpoint** — `openai` (default), `openrouter`, `groq`, or `custom` via `SAYBENCH_LLM_BASE_URL` (vLLM, Ollama, self-hosted — no code changes):
+
+```bash
+saybench llm -targets gpt-4o-mini,groq:llama-3.3-70b-versatile,openrouter:google/gemini-2.5-flash -report llm.json
+```
+
+The bundled `llm/golden.jsonl` is voice-agent-shaped — short system prompts, brief histories, disfluent user turns, small token caps — because that's the workload a conversation loop actually runs, not essay generation. Latency only, by design: outputs are captured in the report for reading, and quality judging is a separate roadmap item rather than a half-measure bolted onto a latency bench.
+
 ## The dashboard
 
 `saybench html -o dashboard.html run1.json run2.json ...` renders any set of reports into a **single self-contained HTML file** — no server, no CDN, no build step. Latest-run summary, A/B comparison between any two runs, WER trend across runs, per-category and latency charts, keyterm recall, and a worst-clips table with the exact missed terms. Commit it as a CI artifact and every PR gets a visual diff of its voice pipeline.

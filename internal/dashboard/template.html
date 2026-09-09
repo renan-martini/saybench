@@ -146,7 +146,9 @@
 const DATA = JSON.parse(document.getElementById("data").textContent);
 const runs = DATA.runs;
 const latest = runs[runs.length - 1];
-const STREAMING = (latest.mode || "batch") === "streaming";
+const MODE = latest.mode || "batch";
+const STREAMING = MODE === "streaming";
+const LLM = MODE === "llm";
 
 // ---- provider identity: fixed slot order, stable across every chart ----
 const providers = [...new Set(runs.flatMap(r => (r.summaries || []).map(s => s.provider)))].sort();
@@ -177,17 +179,22 @@ function bindTips(root) {
 
 // ---- latest-run summary table ----
 {
-  const latCols = STREAMING
-    ? s => `<td class="mono">${s.avg_ttf_partial_ms || 0}ms</td><td class="mono">${s.avg_final_lag_ms || 0}ms</td><td class="mono">${pct(s.interim_word_survival == null ? -1 : s.interim_word_survival)}</td>`
-    : s => `<td class="mono">${s.avg_latency_ms}ms</td><td class="mono">${s.p95_latency_ms}ms</td>`;
-  const latHead = STREAMING ? "<th>ttfp avg</th><th>final lag avg</th><th>interim survival</th>" : "<th>avg latency</th><th>p95</th>";
+  const latCols = LLM
+    ? s => `<td class="mono">${s.avg_ttft_ms || 0}ms</td><td class="mono">${s.p95_ttft_ms || 0}ms</td><td class="mono">${s.avg_completion_ms || 0}ms</td><td class="mono">${(s.avg_tokens_per_sec || 0).toFixed(1)}</td>`
+    : STREAMING
+    ? s => `<td class="mono">${pct(s.wer)}</td><td class="mono">${pct(s.keyterm_recall)}</td><td class="mono">${s.avg_ttf_partial_ms || 0}ms</td><td class="mono">${s.avg_final_lag_ms || 0}ms</td><td class="mono">${pct(s.interim_word_survival == null ? -1 : s.interim_word_survival)}</td>`
+    : s => `<td class="mono">${pct(s.wer)}</td><td class="mono">${pct(s.keyterm_recall)}</td><td class="mono">${s.avg_latency_ms}ms</td><td class="mono">${s.p95_latency_ms}ms</td>`;
+  const latHead = LLM
+    ? "<th>ttft avg</th><th>ttft p95</th><th>completion avg</th><th>tok/s</th>"
+    : STREAMING
+    ? "<th>wer</th><th>keyterm recall</th><th>ttfp avg</th><th>final lag avg</th><th>interim survival</th>"
+    : "<th>wer</th><th>keyterm recall</th><th>avg latency</th><th>p95</th>";
   const rows = (latest.summaries || []).map(s => `<tr>
     <td><span class="sw" style="background:${colorOf(s.provider)};display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px"></span>${esc(s.provider)}</td>
-    <td>${s.items}</td><td>${s.errors}</td><td class="mono">${pct(s.wer)}</td>
-    <td class="mono">${pct(s.keyterm_recall)}</td>
+    <td>${s.items}</td><td>${s.errors}</td>
     ${latCols(s)}</tr>`).join("");
   document.getElementById("summary").innerHTML =
-    `<table><thead><tr><th>provider</th><th>clips</th><th>errors</th><th>wer</th><th>keyterm recall</th>${latHead}</tr></thead><tbody>${rows}</tbody></table>`;
+    `<table><thead><tr><th>${LLM ? "target" : "provider"}</th><th>${LLM ? "prompts" : "clips"}</th><th>errors</th>${latHead}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 // ---- A/B compare ----
@@ -205,16 +212,26 @@ function bindTips(root) {
     const rows = (B.summaries || []).map(b => {
       const a = by[b.provider];
       if (!a) return `<tr><td>${esc(b.provider)}</td><td colspan="4" class="note">only in candidate</td></tr>`;
-      const chg = (a.wer < 0 || b.wer < 0) ? null : (b.wer - a.wer) * 100;
+      const chg = LLM ? null : (a.wer < 0 || b.wer < 0) ? null : (b.wer - a.wer) * 100;
       const cls = chg == null ? "" : chg > 0.05 ? "up" : chg < -0.05 ? "down" : "";
       const sign = chg == null ? "—" : (chg >= 0 ? "+" : "") + chg.toFixed(1) + "pp";
+      if (LLM) {
+        const d = (b.avg_ttft_ms || 0) - (a.avg_ttft_ms || 0);
+        const lcls = d > 5 ? "up" : d < -5 ? "down" : "";
+        return `<tr><td><span style="background:${colorOf(b.provider)};display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px"></span>${esc(b.provider)}</td>
+          <td class="mono">${a.avg_ttft_ms || 0}ms → ${b.avg_ttft_ms || 0}ms</td><td class="${lcls}">${(d >= 0 ? "+" : "") + d}ms</td>
+          <td class="mono">${a.avg_completion_ms || 0}ms → ${b.avg_completion_ms || 0}ms</td>
+          <td class="mono">${(a.avg_tokens_per_sec || 0).toFixed(1)} → ${(b.avg_tokens_per_sec || 0).toFixed(1)} tok/s</td></tr>`;
+      }
       return `<tr><td><span style="background:${colorOf(b.provider)};display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px"></span>${esc(b.provider)}</td>
         <td class="mono">${pct(a.wer)} → ${pct(b.wer)}</td><td class="${cls}">${sign}</td>
         <td class="mono">${pct(a.keyterm_recall)} → ${pct(b.keyterm_recall)}</td>
         <td class="mono">${STREAMING ? (a.avg_ttf_partial_ms || 0) : a.avg_latency_ms}ms → ${STREAMING ? (b.avg_ttf_partial_ms || 0) : b.avg_latency_ms}ms</td></tr>`;
     }).join("");
     document.getElementById("ab").innerHTML =
-      `<table><thead><tr><th>provider</th><th>wer</th><th>change</th><th>keyterm recall</th><th>${STREAMING ? "ttfp avg" : "avg latency"}</th></tr></thead><tbody>${rows}</tbody></table>`;
+      LLM
+        ? `<table><thead><tr><th>target</th><th>ttft</th><th>change</th><th>completion</th><th>decode</th></tr></thead><tbody>${rows}</tbody></table>`
+        : `<table><thead><tr><th>provider</th><th>wer</th><th>change</th><th>keyterm recall</th><th>${STREAMING ? "ttfp avg" : "avg latency"}</th></tr></thead><tbody>${rows}</tbody></table>`;
   };
   selA.onchange = selB.onchange = render;
   render();
@@ -222,8 +239,14 @@ function bindTips(root) {
     `<span class="note">one run so far — pass more report files to compare</span>`);
 }
 
-// ---- WER trend (line, one series per provider) ----
+// ---- trend (line, one series per provider): WER, or TTFT in llm mode ----
 {
+  if (LLM) {
+    document.querySelector("#sec-trend h2").textContent = "TTFT across runs";
+    document.getElementById("sec-cat").remove();
+    const kt = document.getElementById("sec-kt");
+    if (kt) kt.remove();
+  }
   const el = document.getElementById("trend");
   if (runs.length < 2) {
     el.innerHTML = `<p class="note">Trends appear once there are two or more runs.</p>`;
@@ -232,7 +255,9 @@ function bindTips(root) {
     const W = 900, H = 240, L = 44, R = 60, T = 14, B = 28;
     const series = providers.map(p => runs.map(r => {
       const s = (r.summaries || []).find(x => x.provider === p);
-      return s && s.wer >= 0 ? s.wer * 100 : null;
+      if (!s) return null;
+      if (LLM) return s.avg_ttft_ms || null;
+      return s.wer >= 0 ? s.wer * 100 : null;
     }));
     const max = Math.max(5, ...series.flat().filter(v => v != null)) * 1.15;
     const x = i => L + (W - L - R) * (runs.length === 1 ? 0.5 : i / (runs.length - 1));
@@ -241,7 +266,7 @@ function bindTips(root) {
     for (let t = 0; t <= 4; t++) {
       const v = max * t / 4, yy = y(v);
       g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}"/>` +
-           `<text x="${L - 6}" y="${yy + 4}" text-anchor="end">${v.toFixed(0)}%</text>`;
+           `<text x="${L - 6}" y="${yy + 4}" text-anchor="end">${v.toFixed(0)}${LLM ? "ms" : "%"}</text>`;
     }
     runs.forEach((r, i) => g += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">#${i + 1}</text>`);
     providers.forEach((p, pi) => {
@@ -253,7 +278,7 @@ function bindTips(root) {
                data-tip="<b>${esc(p)}</b><br>${esc(runLabel(runs[i], i))}<br>WER ${series[pi][i].toFixed(1)}%"/>`;
       });
       const last = pts.filter(Boolean).pop();
-      if (last) g += `<text class="val" x="${last[0] + 8}" y="${last[1] + 4}">${series[pi][runs.length-1] != null ? series[pi][runs.length-1].toFixed(1) + "%" : ""}</text>`;
+      if (last) g += `<text class="val" x="${last[0] + 8}" y="${last[1] + 4}">${series[pi][runs.length-1] != null ? series[pi][runs.length-1].toFixed(LLM ? 0 : 1) + (LLM ? "ms" : "%") : ""}</text>`;
     });
     el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Word error rate across runs, one line per provider">${g}<line class="axis" x1="${L}" x2="${W-R}" y1="${H-B}" y2="${H-B}"/></svg>`;
     document.getElementById("legend-trend").innerHTML =
@@ -283,7 +308,7 @@ function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width, labelW) {
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">${g}<line class="axis" x1="${L}" x2="${L}" y1="4" y2="${H - 6}"/></svg>`;
   bindTips(el);
 }
-{
+if (!LLM) {
   const cats = [...new Set((latest.categories || []).map(c => c.category))].sort();
   const rows = cats.map(cat => ({
     label: cat,
@@ -301,8 +326,11 @@ function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width, labelW) {
 // ---- latency bars (avg, with p95 tick) ----
 {
   if (STREAMING) document.querySelector("#sec-lat h2").textContent = "Streaming latency — latest run";
+  if (LLM) document.querySelector("#sec-lat h2").textContent = "Time to first token — latest run";
   const rows = (latest.summaries || []).map(s => ({ label: s.provider, series: [
-    STREAMING
+    LLM
+      ? { provider: s.provider, avg: s.avg_ttft_ms || 0, p95: s.p95_ttft_ms || 0 }
+      : STREAMING
       ? { provider: s.provider, avg: s.avg_ttf_partial_ms || 0, p95: s.p95_ttf_partial_ms || 0, lag: s.avg_final_lag_ms || 0 }
       : { provider: s.provider, avg: s.avg_latency_ms, p95: s.p95_latency_ms },
   ] }));
@@ -321,7 +349,9 @@ function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width, labelW) {
     g += `<text class="val" x="${L + w + 6}" y="${yPos + barH - 3}">${s.avg}ms</text>`;
     yPos += barH + 14;
   });
-  const note = STREAMING
+  const note = LLM
+    ? "bar = avg time-to-first-token · tick = p95 · streamed chat completions"
+    : STREAMING
     ? "bar = avg time-to-first-partial · tick = p95 · audio fed at real-time pace"
     : "bar = average · tick = p95 · batch round-trip including upload";
   el.innerHTML = `<svg viewBox="0 0 ${W} ${yPos + 4}">${g}<line class="axis" x1="${L}" x2="${L}" y1="4" y2="${yPos - 6}"/></svg>
@@ -330,7 +360,7 @@ function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width, labelW) {
 }
 
 // ---- keyterm recall ----
-{
+if (!LLM) {
   const withKt = (latest.summaries || []).filter(s => s.keyterm_recall >= 0);
   const sec = document.getElementById("sec-kt");
   if (!withKt.length) sec.remove();
@@ -344,6 +374,15 @@ function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width, labelW) {
 
 // ---- worst clips ----
 {
+  if (LLM) {
+    document.querySelector("#sec-worst h2").textContent = "Slowest prompts — latest run";
+    const items = (latest.items || []).filter(i => !i.error).sort((a, b) => b.ttft_ms - a.ttft_ms).slice(0, 10);
+    const rows = items.map(i => `<tr>
+      <td class="mono">${esc(i.prompt || "")}</td><td>${esc(i.category)}</td><td>${esc(i.provider)}</td>
+      <td class="mono">${i.ttft_ms}ms</td><td class="mono">${i.completion_ms}ms</td><td class="mono">${i.output_tokens || "—"}</td></tr>`).join("");
+    document.getElementById("worst").innerHTML =
+      `<table><thead><tr><th>prompt</th><th>category</th><th>target</th><th>ttft</th><th>completion</th><th>tokens</th></tr></thead><tbody>${rows}</tbody></table>`;
+  } else {
   const items = (latest.items || []).filter(i => !i.error).sort((a, b) => b.wer - a.wer).slice(0, 10);
   const rows = items.map(i => `<tr>
     <td class="mono">${esc(i.audio.split("/").pop())}</td>
@@ -354,6 +393,7 @@ function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width, labelW) {
     <td class="missed mono">${(i.missed_keyterms || []).map(esc).join(", ") || "—"}</td></tr>`).join("");
   document.getElementById("worst").innerHTML =
     `<table><thead><tr><th>clip</th><th>category</th><th>provider</th><th>wer</th><th>edits</th><th>missed keyterms</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
   const errs = (latest.items || []).filter(i => i.error).length;
   if (errs) document.getElementById("worst").insertAdjacentHTML("beforeend", `<p class="note" style="margin-top:.5rem">${errs} item(s) errored — see the JSON report.</p>`);
 }

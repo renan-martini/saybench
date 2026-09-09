@@ -25,15 +25,17 @@ measure it. Order is intent, not promise.
 - **v0.5** — **Interim word survival**: of the final's distinct words, the
   fraction any interim previewed — the "were the interims telling the
   truth?" score, word-weighted per provider, in the table and dashboard.
+- **v0.6** — **LLM conversation-loop benchmarking**: `saybench llm` streams
+  chat completions against any OpenAI-compatible endpoint (openai /
+  openrouter / groq / custom base URL) and measures TTFT, completion time,
+  and decode tok/s over a voice-agent-shaped prompt set. Third report mode;
+  dashboard follows. (WebSocket-transport comparison stays below.)
 
 ## Next
 
-### 1. LLM conversation-loop benchmarking
-Streamed time-to-first-token and full completion time for the models driving
-the conversation — against **any OpenAI-compatible endpoint** (OpenAI,
-OpenRouter, Groq, local servers), because that is how real stacks actually
-route models. Same report/compare/dashboard machinery; transport (HTTP vs
-WebSocket) as a dimension where the endpoint supports both.
+### 1. LLM transport dimension
+HTTP SSE vs WebSocket for the same model, where the endpoint offers both —
+the comparison that decides how a voice loop should hold its connection.
 
 ### 2. Speech-to-speech (S2S) models
 The field is collapsing STT → LLM → TTS into single speech-native models

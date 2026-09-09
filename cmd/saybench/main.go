@@ -23,7 +23,7 @@ import (
 	"github.com/renan-martini/saybench/internal/runner"
 )
 
-const version = "0.5.0"
+const version = "0.6.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -39,6 +39,8 @@ func main() {
 		err = cmdSTT(ctx, os.Args[2:])
 	case "stream":
 		err = cmdStream(ctx, os.Args[2:])
+	case "llm":
+		err = cmdLLM(ctx, os.Args[2:])
 	case "compare":
 		err = cmdCompare(os.Args[2:])
 	case "html":
@@ -66,6 +68,7 @@ func usage() {
 Usage:
   saybench stt     -providers fake,deepgram,openai [-manifest golden/manifest.jsonl] [-report out.json] [-format json]
   saybench stream  -providers fake-stream,deepgram,openai-realtime,assemblyai [same flags]
+  saybench llm     -targets fake-llm,gpt-4o-mini,groq:llama-3.3-70b-versatile,openrouter:<model>,custom:<model> [-prompts llm/golden.jsonl]
   saybench compare old.json new.json [-max-wer-regression 2.0]
   saybench html    -o dashboard.html run1.json run2.json ...
   saybench show    report.json [-format json]
@@ -76,7 +79,11 @@ Providers read API keys from the environment only:
   openai            OPENAI_API_KEY     (model: SAYBENCH_OPENAI_MODEL, default gpt-4o-mini-transcribe)
   openai-realtime   OPENAI_API_KEY     (model: SAYBENCH_OPENAI_REALTIME_MODEL)
   assemblyai        ASSEMBLYAI_API_KEY
-  fake, fake-stream no key — deterministic offline providers for CI and demos
+  fake, fake-stream, fake-llm — no key; deterministic offline providers for CI and demos
+
+LLM targets are [provider:]model — openai (default), openrouter (OPENROUTER_API_KEY),
+groq (GROQ_API_KEY), or custom (SAYBENCH_LLM_BASE_URL + optional SAYBENCH_LLM_API_KEY
+— any OpenAI-compatible server: vLLM, Ollama, self-hosted).
 
 Streaming endpoints take URL overrides for self-hosted/compatible servers:
   SAYBENCH_DEEPGRAM_STREAM_URL, SAYBENCH_OPENAI_REALTIME_URL, SAYBENCH_ASSEMBLYAI_STREAM_URL
@@ -210,8 +217,75 @@ func cmdStream(ctx context.Context, args []string) error {
 	return nil
 }
 
+func cmdLLM(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("llm", flag.ExitOnError)
+	targets := fs.String("targets", "fake-llm", "comma-separated [provider:]model targets")
+	promptsPath := fs.String("prompts", "llm/golden.jsonl", "path to a JSONL prompt manifest")
+	reportPath := fs.String("report", "", "write the full JSON report here")
+	format := fs.String("format", "table", "stdout format: table or json")
+	workers := fs.Int("workers", 4, "concurrent requests")
+	timeout := fs.Duration("timeout", 60*time.Second, "per-prompt timeout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	prompts, err := manifest.LoadPrompts(*promptsPath)
+	if err != nil {
+		if os.IsNotExist(err) && *promptsPath == "llm/golden.jsonl" {
+			return fmt.Errorf("default prompt set not found (run from a clone of the repo, or point -prompts at your own JSONL): %w", err)
+		}
+		return err
+	}
+	ts, err := provider.FromLLMSpecs(*targets)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "saybench: %d prompts × %d targets\n", len(prompts), len(ts))
+	results := runner.RunLLM(ctx, ts, prompts, runner.Options{
+		Workers:     *workers,
+		ItemTimeout: *timeout,
+		Progress: func(done, total int) {
+			fmt.Fprintf(os.Stderr, "\r%d/%d", done, total)
+			if done == total {
+				fmt.Fprintln(os.Stderr)
+			}
+		},
+	})
+	if ctx.Err() != nil {
+		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
+	}
+	rep := report.BuildMode(version, *promptsPath, report.ModeLLM, results)
+	switch *format {
+	case "table":
+		printSummary(rep)
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown -format %q (table or json)", *format)
+	}
+	if *reportPath != "" {
+		if err := rep.Save(*reportPath); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "report written to %s\n", *reportPath)
+	}
+	return nil
+}
+
 func printSummary(r report.Report) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	if r.Mode == report.ModeLLM {
+		fmt.Fprintln(w, "TARGET\tPROMPTS\tERRORS\tTTFT AVG\tTTFT P95\tCOMPLETION AVG\tTOK/S")
+		for _, s := range r.Summaries {
+			fmt.Fprintf(w, "%s\t%d\t%d\t%dms\t%dms\t%dms\t%.1f\n",
+				s.Provider, s.Items, s.Errors, s.AvgTTFTMS, s.P95TTFTMS, s.AvgCompletionMS, s.AvgTokensPerSec)
+		}
+		w.Flush()
+		return
+	}
 	if r.Mode == report.ModeStreaming {
 		fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tTTFP AVG\tTTFP P95\tFINAL LAG AVG\tFINAL LAG P95\tINTERIM SURVIVAL")
 		for _, s := range r.Summaries {
