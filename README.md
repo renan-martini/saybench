@@ -142,7 +142,16 @@ openai:gpt-realtime  14     0       601ms                1318ms   2905ms        
 
 Two findings worth the run. First, **the speech-native model out-turns the pipeline it replaces**: put this table next to the others in this README and the composed stack's floor is ~808ms *before TTS even begins* (213ms streaming-STT finalization lag + 595ms warm LLM TTFT, both our own published numbers) — while `gpt-realtime`'s **first audio lands at 601ms average**. Different runs, different modes, deliberately not one merged table — and the comparison still understates the pipeline's cost because TTS time-to-first-audio (roadmap) isn't counted yet. Second, a behavioral finding latency tables usually hide: **the model talks a lot** — 12.4s average spoken reply to one-utterance turns, up to 29s, despite "respond briefly" instructions. At audio-token prices, reply length is a cost and UX axis, which is exactly why `speech out` is a first-class column.
 
-The `openai` S2S adapter worked on first live contact (14/14) — the mock-server tests carry both GA and beta event names, because the Realtime rename has bitten this codebase before.
+Live echo results, September 2026:
+
+```
+PROVIDER             TURNS  ERRORS  ECHO WER  KEYTERM RECALL  V2V FIRST AUDIO AVG  V2V P95  RESPONSE DONE AVG  SPEECH OUT AVG
+openai:gpt-realtime  14     0       27.0%     77.4%           638ms                1054ms   1699ms             5903ms
+```
+
+Reading that 27% honestly, the per-clip transcripts decompose it into three classes. First, the **predicted formatting artifact** ("4 7 3 9 0 2 8" echoed against a spelled-out reference — heard perfectly, scored as error). Second — the finding only this task could surface — **the model can't stop being an assistant**: told to echo "wait, before you do that, check whether the previous order shipped," it replied *"Sure thing. Let me check whether the previous order ever shipped"* — it did the thing instead of repeating it. Audio-mode instruction non-compliance is a real deployment risk, and it's invisible to every latency benchmark. Third, **where it complied, hearing was flawless**: 0.0% on the names clip, the insurance acronyms, and the technical jargon. The keyterm column carries the punchline: as a *listener*, `gpt-realtime` at **77.4% keyterm recall beats `gpt-4o-mini-transcribe`'s 74.2%** on the same golden set — while `nova-3` still leads at 93.5%. Treat the echo WER as an upper bound on mishearing, not a measurement of it — the loop includes formatting, compliance, and self-transcription, and that composite is what a caller experiences.
+
+The `openai` S2S adapter worked on first live contact (14/14) in both phases — the mock-server tests carry both GA and beta event names, because the Realtime rename has bitten this codebase before.
 
 ## The dashboard
 
