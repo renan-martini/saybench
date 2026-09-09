@@ -258,9 +258,9 @@ function bindTips(root) {
 }
 
 // ---- grouped horizontal bars: WER by category ----
-function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width) {
+function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width, labelW) {
   // rows: [{label, series:[{provider, value}]}]
-  const W = width || 440, L = 118, R = 52, barH = 14, gap = 2, groupGap = 14;
+  const W = width || 440, L = labelW || 118, R = 52, barH = 14, gap = 2, groupGap = 14;
   const max = Math.max(maxHint || 0, ...rows.flatMap(r => r.series.map(s => valueOf(s) || 0))) * 1.12 || 1;
   let yPos = 8, g = "";
   rows.forEach(r => {
@@ -297,7 +297,7 @@ function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width) {
 {
   const rows = (latest.summaries || []).map(s => ({ label: s.provider, series: [{ provider: s.provider, avg: s.avg_latency_ms, p95: s.p95_latency_ms }] }));
   const el = document.getElementById("lat");
-  const W = 440, L = 118, R = 64, barH = 16;
+  const W = 440, L = 190, R = 64, barH = 16;
   const max = Math.max(...rows.map(r => r.series[0].p95), 1) * 1.15;
   let yPos = 8, g = "";
   rows.forEach(r => {
@@ -325,7 +325,7 @@ function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width) {
     const rows = withKt.map(s => ({ label: s.provider, series: [{ provider: s.provider, v: s.keyterm_recall * 100 }] }));
     hbars(document.getElementById("kt"), rows,
       s => s.v, v => v.toFixed(1) + "%",
-      (r, s) => `<b>${esc(s.provider)}</b><br>keyterm recall ${s.v.toFixed(1)}%`, 100, 900);
+      (r, s) => `<b>${esc(s.provider)}</b><br>keyterm recall ${s.v.toFixed(1)}%`, 100, 900, 220);
   }
 }
 

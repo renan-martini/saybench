@@ -5,22 +5,46 @@
 Every STT vendor publishes benchmarks showing they're the fastest and most accurate. None of them ran on your audio, your accents, your jargon, or your phone-line quality — and none of them will tell you when an API update quietly makes *your* pipeline worse. saybench does: point it at your providers and your clips, get word-error-rate and latency per provider and per failure mode, and wire the regression gate into CI so a degradation fails the build before your users notice.
 
 ```
-$ saybench stt -providers deepgram,openai -manifest golden/manifest.jsonl -report today.json
+$ saybench stt -providers fake,deepgram,openai -manifest golden/manifest.jsonl -report today.json
 
-PROVIDER  CLIPS  ERRORS  WER    KEYTERM RECALL  AVG LATENCY  P95 LATENCY
-fake      14     0       16.5%  67.7%           47ms         73ms
+PROVIDER                       CLIPS  ERRORS  WER    KEYTERM RECALL  AVG LATENCY  P95 LATENCY
+deepgram:nova-3                14     0       3.8%   93.5%           926ms        2139ms
+fake                           14     0       16.5%  67.7%           47ms         73ms
+openai:gpt-4o-mini-transcribe  14     0       19.0%  74.2%           1319ms       1930ms
 
-PROVIDER  CATEGORY        CLIPS  WER
-fake      acronyms        2      17.6%
-fake      conversational  2      17.1%
-fake      date_time       2      14.3%
-fake      names           2      14.8%
-fake      numbers         2      15.8%
-fake      spelled_name    2      20.0%
-fake      technical       2      14.3%
+PROVIDER                       CATEGORY        CLIPS  WER
+deepgram:nova-3                acronyms        2      8.8%
+deepgram:nova-3                conversational  2      5.7%
+deepgram:nova-3                date_time       2      0.0%
+deepgram:nova-3                names           2      7.4%
+deepgram:nova-3                numbers         2      0.0%
+deepgram:nova-3                spelled_name    2      2.5%
+deepgram:nova-3                technical       2      3.6%
+fake                           acronyms        2      17.6%
+fake                           conversational  2      17.1%
+fake                           date_time       2      14.3%
+fake                           names           2      14.8%
+fake                           numbers         2      15.8%
+fake                           spelled_name    2      20.0%
+fake                           technical       2      14.3%
+openai:gpt-4o-mini-transcribe  acronyms        2      0.0%
+openai:gpt-4o-mini-transcribe  conversational  2      2.9%
+openai:gpt-4o-mini-transcribe  date_time       2      25.7%
+openai:gpt-4o-mini-transcribe  names           2      3.7%
+openai:gpt-4o-mini-transcribe  numbers         2      55.3%
+openai:gpt-4o-mini-transcribe  spelled_name    2      17.5%
+openai:gpt-4o-mini-transcribe  technical       2      21.4%
 ```
 
-*(Output above is a real run of the bundled offline `fake` provider — reproducible on your machine with zero API keys. Vendor tables belong in your reports, not this README.)*
+*(Real output: the bundled golden set against live vendor APIs, September 2026 — plus the offline `fake` provider that runs with zero keys. Your audio will rank them differently; that is the point of the tool.)*
+
+## What one real run teaches
+
+That table hides a better story, which is exactly why saybench reports more than one number:
+
+- **The headline flatters and slanders at the same time.** `gpt-4o-mini-transcribe` scores 19% overall WER — but per category it *beats* nova-3 on acronyms (0.0% vs 8.8%), names, and conversational speech. Its catastrophic categories are numbers (55.3%) and dates (25.7%) — and reading the hypotheses shows why: **it heard the digits perfectly and wrote `4739028` and `$247.63`** while the reference spells the words out. Literal WER counts formatting as error. (Deepgram has the inverse artifact: it spelled out "four hundred one" where the reference said `401`.) Text-normalization options are on the [roadmap](ROADMAP.md) precisely because of this — until then, the per-clip hypotheses in the report let you see the difference between *misheard* and *reformatted*.
+- **Keyterm recall catches what WER buries.** One vendor transcribed the Kubernetes deployment as "the Cuba Needs deployment" — a 15% WER clip, but a 100% useless transcript for a technical support call. Both vendors dropped the name "Priya Raghunathan". That's the metric that decides whether a voice agent can say your customer's name back.
+- **Latency is a real axis:** ~926ms vs ~1319ms average round-trip on identical clips.
 
 ## The dashboard
 
@@ -65,6 +89,10 @@ saybench stt -providers deepgram -manifest my-corpus/manifest.jsonl -report toda
 
 # 4. Catch regressions — in CI, fail if any provider got >2 points worse:
 saybench compare baseline.json today.json -max-wer-regression 2.0
+
+# 5. Revisit any saved report, or render a set of them into a dashboard:
+saybench show today.json
+saybench html -o dashboard.html baseline.json today.json
 ```
 
 ## Providers

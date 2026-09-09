@@ -30,3 +30,4 @@ jobs:
           ./saybench compare base.json again.json -max-wer-regression 0.0
           ./saybench html -o dash.html base.json again.json
           grep -q "saybench dashboard" dash.html
+          ./saybench show base.json | grep -q "KEYTERM RECALL"

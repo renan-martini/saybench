@@ -23,7 +23,7 @@ import (
 	"github.com/renan-martini/saybench/internal/runner"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -41,6 +41,8 @@ func main() {
 		err = cmdCompare(os.Args[2:])
 	case "html":
 		err = cmdHTML(os.Args[2:])
+	case "show":
+		err = cmdShow(os.Args[2:])
 	case "version":
 		fmt.Println("saybench", version)
 	case "help", "-h", "--help":
@@ -63,6 +65,7 @@ Usage:
   saybench stt     -providers fake,deepgram,openai [-manifest golden/manifest.jsonl] [-report out.json]
   saybench compare old.json new.json [-max-wer-regression 2.0]
   saybench html    -o dashboard.html run1.json run2.json ...
+  saybench show    report.json [-format json]
   saybench version
 
 Providers read API keys from the environment only:
@@ -153,6 +156,29 @@ func printSummary(r report.Report) {
 		fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", c.Provider, c.Category, c.Items, report.FormatPct(c.WER))
 	}
 	w.Flush()
+}
+
+// cmdShow re-renders a saved report as the standard summary tables.
+func cmdShow(args []string) error {
+	fs := flag.NewFlagSet("show", flag.ExitOnError)
+	format := fs.String("format", "table", "stdout format: table or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: saybench show report.json")
+	}
+	r, err := report.LoadFile(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if *format == "json" {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(r)
+	}
+	printSummary(r)
+	return nil
 }
 
 func cmdHTML(args []string) error {
