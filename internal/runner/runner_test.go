@@ -66,4 +66,7 @@ func TestRunStreamWithFake(t *testing.T) {
 	if r.WER <= 0 || r.RefWords != 10 || r.KeytermsTotal != 1 {
 		t.Fatalf("scoring missing: %+v", r)
 	}
+	if r.InterimSurvivalTotal <= 0 || r.InterimSurvivalHit <= 0 || r.InterimSurvivalHit >= r.InterimSurvivalTotal {
+		t.Fatalf("interim survival not scored (want 0 < hit < total): %+v", r)
+	}
 }

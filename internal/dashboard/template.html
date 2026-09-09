@@ -178,9 +178,9 @@ function bindTips(root) {
 // ---- latest-run summary table ----
 {
   const latCols = STREAMING
-    ? s => `<td class="mono">${s.avg_ttf_partial_ms || 0}ms</td><td class="mono">${s.avg_final_lag_ms || 0}ms</td>`
+    ? s => `<td class="mono">${s.avg_ttf_partial_ms || 0}ms</td><td class="mono">${s.avg_final_lag_ms || 0}ms</td><td class="mono">${pct(s.interim_word_survival == null ? -1 : s.interim_word_survival)}</td>`
     : s => `<td class="mono">${s.avg_latency_ms}ms</td><td class="mono">${s.p95_latency_ms}ms</td>`;
-  const latHead = STREAMING ? "<th>ttfp avg</th><th>final lag avg</th>" : "<th>avg latency</th><th>p95</th>";
+  const latHead = STREAMING ? "<th>ttfp avg</th><th>final lag avg</th><th>interim survival</th>" : "<th>avg latency</th><th>p95</th>";
   const rows = (latest.summaries || []).map(s => `<tr>
     <td><span class="sw" style="background:${colorOf(s.provider)};display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px"></span>${esc(s.provider)}</td>
     <td>${s.items}</td><td>${s.errors}</td><td class="mono">${pct(s.wer)}</td>

@@ -36,13 +36,22 @@ func (f *FakeStream) StreamTranscribe(_ context.Context, audioPath string) (Stre
 			out = append(out, w)
 		}
 	}
+	final := strings.Join(out, " ")
+	// Two cumulative interim snapshots (first third, first two-thirds of the
+	// final) — deterministic, and deliberately missing the tail words so the
+	// survival score is meaningfully below 100%.
+	interims := []string{
+		strings.Join(out[:len(out)/3], " "),
+		strings.Join(out[:len(out)*2/3], " "),
+	}
 	h := fnv.New32a()
 	h.Write([]byte(audioPath))
 	n := h.Sum32()
 	return StreamResult{
-		Text:         strings.Join(out, " "),
+		Text:         final,
 		TTFPartialMS: int(150 + n%200),
 		FinalLagMS:   int(80 + n%150),
-		Interims:     1 + len(words)/3,
+		Interims:     len(interims),
+		InterimTexts: interims,
 	}, nil
 }

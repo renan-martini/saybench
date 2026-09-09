@@ -61,3 +61,28 @@ func TestKeytermHits(t *testing.T) {
 		t.Fatalf("partial word matched: %v", hit)
 	}
 }
+
+func TestWordSurvival(t *testing.T) {
+	tests := []struct {
+		name     string
+		final    string
+		interims []string
+		hit, tot int
+	}{
+		{"all seen", "pay two hundred", []string{"pay two", "pay two hundred"}, 3, 3},
+		{"late word never previewed", "pay two hundred dollars", []string{"pay two hundred"}, 3, 4},
+		{"revised interim words don't matter", "pay two hundred", []string{"play tooth"}, 0, 3},
+		{"no interims", "pay two", nil, 0, 2},
+		{"empty final", "", []string{"noise"}, 0, 0},
+		{"repeats count once", "seven seven seven", []string{"seven"}, 1, 1},
+		{"normalization applies", "Pay $200!", []string{"pay 200"}, 2, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hit, tot := WordSurvival(tt.final, tt.interims)
+			if hit != tt.hit || tot != tt.tot {
+				t.Fatalf("WordSurvival() = %d/%d, want %d/%d", hit, tot, tt.hit, tt.tot)
+			}
+		})
+	}
+}

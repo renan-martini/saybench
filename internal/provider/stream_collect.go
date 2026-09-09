@@ -15,6 +15,7 @@ type collector struct {
 	firstPartial time.Time
 	lastFinal    time.Time
 	interims     int
+	interimTexts []string
 	finals       []string
 }
 
@@ -37,6 +38,7 @@ func (c *collector) interim(text string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.interims++
+	c.interimTexts = append(c.interimTexts, text)
 	if c.firstPartial.IsZero() {
 		c.firstPartial = time.Now()
 	}
@@ -58,7 +60,7 @@ func (c *collector) final(text string) {
 func (c *collector) result() StreamResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	r := StreamResult{Text: strings.Join(c.finals, " "), Interims: c.interims}
+	r := StreamResult{Text: strings.Join(c.finals, " "), Interims: c.interims, InterimTexts: c.interimTexts}
 	if !c.firstPartial.IsZero() && !c.start.IsZero() {
 		r.TTFPartialMS = ceilMS(c.firstPartial.Sub(c.start))
 	}

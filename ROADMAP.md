@@ -21,48 +21,46 @@ measure it. Order is intent, not promise.
   AssemblyAI Universal-Streaming) and measures time-to-first-partial,
   finalization lag, and interim count. Mode-tagged reports; `compare`
   refuses cross-mode deltas; adapters tested against local protocol
-  servers. (Interim *stability* — word-survival rate — remains below.)
+  servers.
+- **v0.5** — **Interim word survival**: of the final's distinct words, the
+  fraction any interim previewed — the "were the interims telling the
+  truth?" score, word-weighted per provider, in the table and dashboard.
 
 ## Next
 
-### 1. Interim stability scoring
-Of the words in the final transcript, the fraction that appeared unchanged in
-an earlier interim ("word-survival rate"). High = interims are trustworthy
-previews; low = any UI built on them lies until finalization.
-
-### 2. LLM conversation-loop benchmarking
+### 1. LLM conversation-loop benchmarking
 Streamed time-to-first-token and full completion time for the models driving
 the conversation — against **any OpenAI-compatible endpoint** (OpenAI,
 OpenRouter, Groq, local servers), because that is how real stacks actually
 route models. Same report/compare/dashboard machinery; transport (HTTP vs
 WebSocket) as a dimension where the endpoint supports both.
 
-### 3. TTS time-to-first-audio
+### 2. TTS time-to-first-audio
 The other half of response latency: how long from send to the first audible
 byte, per vendor and voice. TTFA is the number a caller hears.
 
-### 4. MCP server mode (`saybench mcp`)
+### 3. MCP server mode (`saybench mcp`)
 Benchmarks should be usable by coding agents, not just humans. An MCP server
 exposing `run_stt_bench`, `compare_reports`, and `read_report` lets an LLM
 assistant benchmark the pipeline it is editing — before a feature ships, as
 part of its own loop. The `-format json` output is the foundation; this makes
 it native.
 
-### 5. Pipecat adapter
+### 4. Pipecat adapter
 Point saybench at a Pipecat pipeline's configured STT/TTS/LLM services and
 bench exactly what the pipeline runs, not a hand-maintained parallel config.
 
-### 6. Cost columns
+### 5. Cost columns
 $/hour of audio per provider next to WER and latency, from a maintained
 pricing table — model choices are three-axis trade-offs; the report should
 show all three axes.
 
-### 7. Scoring depth
+### 6. Scoring depth
 - Text-normalization options (number formats: "401" vs "four oh one" —
   today's literal scoring counts formatting as error; make that a choice).
 - Optional judge-based semantic scoring beside literal WER, for "meaning
   survived, words differ" cases. Never a replacement for WER — an addition,
   clearly labeled.
 
-### 8. More providers
+### 7. More providers
 The interface is two methods. PRs welcome — see CONTRIBUTING.md.

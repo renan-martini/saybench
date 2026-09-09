@@ -20,6 +20,9 @@ type StreamResult struct {
 	FinalLagMS int
 	// Interims counts interim updates (a churn proxy).
 	Interims int
+	// InterimTexts are the interim snapshots, in arrival order — the raw
+	// material for the word-survival stability score.
+	InterimTexts []string
 }
 
 // StreamingProvider transcribes one audio file over a streaming connection,

@@ -138,6 +138,9 @@ func runOneStream(ctx context.Context, p provider.StreamingProvider, it manifest
 	res.TTFPartialMS = out.TTFPartialMS
 	res.FinalLagMS = out.FinalLagMS
 	res.Interims = out.Interims
+	if len(out.InterimTexts) > 0 {
+		res.InterimSurvivalHit, res.InterimSurvivalTotal = wer.WordSurvival(out.Text, out.InterimTexts)
+	}
 	c := wer.Compute(it.Reference, out.Text)
 	res.Sub, res.Del, res.Ins, res.RefWords = c.Sub, c.Del, c.Ins, c.RefWords
 	res.WER = c.WER()

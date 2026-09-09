@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
@@ -13,11 +14,14 @@ func TestFakeStreamIsDeterministicAndStreamShaped(t *testing.T) {
 		t.Fatal(err)
 	}
 	r2, _ := f.StreamTranscribe(context.Background(), "/a.wav")
-	if r1 != r2 {
+	if !reflect.DeepEqual(r1, r2) {
 		t.Fatalf("fake-stream not deterministic: %+v vs %+v", r1, r2)
 	}
 	if r1.TTFPartialMS <= 0 || r1.FinalLagMS <= 0 || r1.Interims <= 0 {
 		t.Fatalf("stream metrics must be positive: %+v", r1)
+	}
+	if len(r1.InterimTexts) != r1.Interims || len(r1.InterimTexts) == 0 {
+		t.Fatalf("interim texts must be captured and agree with the count: %+v", r1)
 	}
 	if r1.Text == "" {
 		t.Fatal("empty transcript")

@@ -134,3 +134,18 @@ func TestCompareRefusesMixedModes(t *testing.T) {
 		t.Fatalf("legacy empty mode must equal batch: %v", err)
 	}
 }
+
+func TestInterimSurvivalAggregation(t *testing.T) {
+	items := []ItemResult{
+		{Provider: "p", RefWords: 5, InterimSurvivalHit: 8, InterimSurvivalTotal: 10},
+		{Provider: "p", RefWords: 5, InterimSurvivalHit: 2, InterimSurvivalTotal: 10},
+		{Provider: "q", RefWords: 5}, // no interims -> no survival data
+	}
+	r := BuildMode("t", "m", ModeStreaming, items)
+	if r.Summaries[0].InterimWordSurvival != 0.5 {
+		t.Fatalf("p survival = %v, want 0.5 (word-weighted)", r.Summaries[0].InterimWordSurvival)
+	}
+	if r.Summaries[1].InterimWordSurvival != -1 {
+		t.Fatalf("q survival = %v, want -1 sentinel", r.Summaries[1].InterimWordSurvival)
+	}
+}

@@ -129,3 +129,30 @@ outer:
 	}
 	return false
 }
+
+// WordSurvival reports how many of the final transcript's distinct
+// normalized words appeared in at least one interim — the "were the interims
+// telling the truth?" metric for streaming STT. Distinct-word counting by
+// design: vendors stream with different semantics (replacement hypotheses vs
+// append-only deltas), and per-occurrence accounting would need per-vendor
+// rules. A repeated final word counts once.
+func WordSurvival(final string, interims []string) (hit, total int) {
+	seen := map[string]bool{}
+	for _, in := range interims {
+		for _, w := range Normalize(in) {
+			seen[w] = true
+		}
+	}
+	counted := map[string]bool{}
+	for _, w := range Normalize(final) {
+		if counted[w] {
+			continue
+		}
+		counted[w] = true
+		total++
+		if seen[w] {
+			hit++
+		}
+	}
+	return hit, total
+}

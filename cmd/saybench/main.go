@@ -23,7 +23,7 @@ import (
 	"github.com/renan-martini/saybench/internal/runner"
 )
 
-const version = "0.4.0"
+const version = "0.5.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -213,11 +213,11 @@ func cmdStream(ctx context.Context, args []string) error {
 func printSummary(r report.Report) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 	if r.Mode == report.ModeStreaming {
-		fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tTTFP AVG\tTTFP P95\tFINAL LAG AVG\tFINAL LAG P95")
+		fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tTTFP AVG\tTTFP P95\tFINAL LAG AVG\tFINAL LAG P95\tINTERIM SURVIVAL")
 		for _, s := range r.Summaries {
-			fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%dms\t%dms\t%dms\t%dms\n",
+			fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%dms\t%dms\t%dms\t%dms\t%s\n",
 				s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), report.FormatPct(s.KeytermRecall),
-				s.AvgTTFPartialMS, s.P95TTFPartialMS, s.AvgFinalLagMS, s.P95FinalLagMS)
+				s.AvgTTFPartialMS, s.P95TTFPartialMS, s.AvgFinalLagMS, s.P95FinalLagMS, report.FormatPct(s.InterimWordSurvival))
 		}
 	} else {
 		fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tAVG LATENCY\tP95 LATENCY")

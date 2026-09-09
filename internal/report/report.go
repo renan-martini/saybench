@@ -39,6 +39,10 @@ type ItemResult struct {
 	TTFPartialMS int `json:"ttf_partial_ms,omitempty"`
 	FinalLagMS   int `json:"final_lag_ms,omitempty"`
 	Interims     int `json:"interims,omitempty"`
+	// Interim word survival: of the final's distinct words, how many any
+	// interim previewed. Zero totals mean "no interims" — not a bad score.
+	InterimSurvivalHit   int `json:"interim_survival_hit,omitempty"`
+	InterimSurvivalTotal int `json:"interim_survival_total,omitempty"`
 	// Keyterm recall: of the clip's important terms, how many survived
 	// transcription intact. MissedKeyterms names the casualties.
 	KeytermsTotal  int      `json:"keyterms_total,omitempty"`
@@ -62,11 +66,13 @@ type Summary struct {
 	KeytermRecall float64 `json:"keyterm_recall"`
 	AvgLatencyMS  int64   `json:"avg_latency_ms"`
 	P95LatencyMS  int64   `json:"p95_latency_ms"`
-	// Streaming-mode aggregates (zero in batch mode).
-	AvgTTFPartialMS int64 `json:"avg_ttf_partial_ms,omitempty"`
-	P95TTFPartialMS int64 `json:"p95_ttf_partial_ms,omitempty"`
-	AvgFinalLagMS   int64 `json:"avg_final_lag_ms,omitempty"`
-	P95FinalLagMS   int64 `json:"p95_final_lag_ms,omitempty"`
+	// Streaming-mode aggregates (zero in batch mode). InterimWordSurvival
+	// is word-weighted (sum hits over sum totals); -1 = no interim data.
+	InterimWordSurvival float64 `json:"interim_word_survival,omitempty"`
+	AvgTTFPartialMS     int64   `json:"avg_ttf_partial_ms,omitempty"`
+	P95TTFPartialMS     int64   `json:"p95_ttf_partial_ms,omitempty"`
+	AvgFinalLagMS       int64   `json:"avg_final_lag_ms,omitempty"`
+	P95FinalLagMS       int64   `json:"p95_final_lag_ms,omitempty"`
 }
 
 // CategorySummary aggregates one provider within one failure-mode category.
@@ -100,6 +106,7 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 	type agg struct {
 		edits, words, errs, n int
 		ktHit, ktTotal        int
+		survHit, survTotal    int
 		latencies             []int64
 		ttfps, lags           []int64
 	}
@@ -132,6 +139,8 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 			if mode == ModeStreaming {
 				x.ttfps = append(x.ttfps, int64(it.TTFPartialMS))
 				x.lags = append(x.lags, int64(it.FinalLagMS))
+				x.survHit += it.InterimSurvivalHit
+				x.survTotal += it.InterimSurvivalTotal
 			}
 		}
 	}
@@ -159,6 +168,12 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 		s.AvgLatencyMS, s.P95LatencyMS = avgP95(a.latencies)
 		s.AvgTTFPartialMS, s.P95TTFPartialMS = avgP95(a.ttfps)
 		s.AvgFinalLagMS, s.P95FinalLagMS = avgP95(a.lags)
+		if mode == ModeStreaming {
+			s.InterimWordSurvival = -1
+			if a.survTotal > 0 {
+				s.InterimWordSurvival = float64(a.survHit) / float64(a.survTotal)
+			}
+		}
 		summaries = append(summaries, s)
 	}
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Provider < summaries[j].Provider })

@@ -52,7 +52,7 @@ That table hides a better story, which is exactly why saybench reports more than
 
 - **Time-to-first-partial** — first audio byte sent → first interim received. When your captions can start moving.
 - **Finalization lag** — end of audio → last final segment. The dead air before your LLM can even start thinking.
-- **Interim count** — how many interim updates arrived (a churn proxy; a word-survival stability score is on the roadmap).
+- **Interim word survival** — of the final transcript's distinct words, the fraction any interim previewed. High = interims are trustworthy (safe for captions, barge-in, early LLM starts); low = the stream rewrites itself until finalization. Stated openly: append-only-delta vendors (OpenAI Realtime) score ~100% *by construction* — the metric is surfacing that their interims never lie, while replacement-hypothesis vendors (Deepgram) reveal how much they revise. Interim count ships beside it as the raw churn number.
 
 WER, categories, and keyterm recall still score the final transcript. Streaming and batch reports carry a `mode` field, and `compare` **refuses** to compare across modes — the two latencies measure different things, and a delta between them would be a lie.
 
