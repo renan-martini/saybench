@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync/atomic"
 
 	"github.com/coder/websocket"
 
@@ -56,10 +57,7 @@ func (o *OpenAIRealtime) StreamTranscribe(ctx context.Context, audioPath string)
 	pcm := resampleTo(f, openaiRealtimeRate)
 
 	conn, _, err := websocket.Dial(ctx, o.base, &websocket.DialOptions{
-		HTTPHeader: http.Header{
-			"Authorization": {"Bearer " + o.key},
-			"OpenAI-Beta":   {"realtime=v1"},
-		},
+		HTTPHeader: http.Header{"Authorization": {"Bearer " + o.key}},
 	})
 	if err != nil {
 		return StreamResult{}, fmt.Errorf("openai-realtime: dial: %w", err)
@@ -74,12 +72,21 @@ func (o *OpenAIRealtime) StreamTranscribe(ctx context.Context, audioPath string)
 		}
 		return conn.Write(ctx, websocket.MessageText, b)
 	}
+	// GA transcription-session shape (the beta "transcription_session.update"
+	// with input_audio_format:"pcm16" is rejected by the live API).
+	// turn_detection:null means no server VAD — we commit explicitly after
+	// the feed ends, which makes finalization deterministic for measurement.
 	if err := send(map[string]any{
-		"type": "transcription_session.update",
+		"type": "session.update",
 		"session": map[string]any{
-			"input_audio_format":        "pcm16",
-			"input_audio_transcription": map[string]any{"model": o.model},
-			"turn_detection":            map[string]any{"type": "server_vad"},
+			"type": "transcription",
+			"audio": map[string]any{
+				"input": map[string]any{
+					"format":         map[string]any{"type": "audio/pcm", "rate": openaiRealtimeRate},
+					"transcription":  map[string]any{"model": o.model},
+					"turn_detection": nil,
+				},
+			},
 		},
 	}); err != nil {
 		return StreamResult{}, fmt.Errorf("openai-realtime: session update: %w", err)
@@ -87,6 +94,8 @@ func (o *OpenAIRealtime) StreamTranscribe(ctx context.Context, audioPath string)
 
 	col := &collector{}
 	readDone := make(chan error, 1)
+	completed := make(chan struct{}, 1)
+	var serverErr atomic.Value // last {"type":"error"} event message
 	go func() {
 		for {
 			_, msg, err := conn.Read(ctx)
@@ -98,6 +107,9 @@ func (o *OpenAIRealtime) StreamTranscribe(ctx context.Context, audioPath string)
 				Type       string `json:"type"`
 				Delta      string `json:"delta"`
 				Transcript string `json:"transcript"`
+				Error      struct {
+					Message string `json:"message"`
+				} `json:"error"`
 			}
 			if json.Unmarshal(msg, &ev) != nil {
 				continue
@@ -107,9 +119,23 @@ func (o *OpenAIRealtime) StreamTranscribe(ctx context.Context, audioPath string)
 				col.interim(ev.Delta)
 			case "conversation.item.input_audio_transcription.completed":
 				col.final(ev.Transcript)
+				select {
+				case completed <- struct{}{}:
+				default:
+				}
+			case "error":
+				serverErr.Store(ev.Error.Message)
 			}
 		}
 	}()
+	// failWith folds the server's own error event (the actual reason) into
+	// any transport-level failure, instead of reporting "connection closed".
+	failWith := func(stage string, err error) error {
+		if m, ok := serverErr.Load().(string); ok && m != "" {
+			return fmt.Errorf("openai-realtime: %s: server error: %s", stage, m)
+		}
+		return fmt.Errorf("openai-realtime: %s: %w", stage, err)
+	}
 
 	// Feed as a synthetic wav.File at the realtime rate so pacing math holds.
 	rf := &wav.File{SampleRate: openaiRealtimeRate, Channels: 1, BitsPerSample: 16, Data: pcm}
@@ -122,12 +148,31 @@ func (o *OpenAIRealtime) StreamTranscribe(ctx context.Context, audioPath string)
 	col.begin(start)
 	col.endFeed(end)
 	if err != nil {
-		return StreamResult{}, fmt.Errorf("openai-realtime: send: %w", err)
+		<-readDone // let the reader capture any error event first
+		return StreamResult{}, failWith("send", err)
 	}
 	if err := send(map[string]any{"type": "input_audio_buffer.commit"}); err != nil {
-		return StreamResult{}, fmt.Errorf("openai-realtime: commit: %w", err)
+		<-readDone
+		return StreamResult{}, failWith("commit", err)
 	}
-	if err := <-readDone; err != nil && websocket.CloseStatus(err) == -1 && ctx.Err() != nil {
+	// The live API keeps the socket open after the transcript completes —
+	// the client owns the goodbye. Wait for the completed event (or an
+	// early server close / deadline), then close and drain the reader.
+	select {
+	case <-completed:
+		conn.Close(websocket.StatusNormalClosure, "")
+		<-readDone
+	case err := <-readDone:
+		if m, ok := serverErr.Load().(string); ok && m != "" {
+			return StreamResult{}, fmt.Errorf("openai-realtime: server error: %s", m)
+		}
+		if err != nil && websocket.CloseStatus(err) == -1 {
+			if ctx.Err() != nil {
+				return StreamResult{}, ctx.Err()
+			}
+			return StreamResult{}, fmt.Errorf("openai-realtime: connection: %w", err)
+		}
+	case <-ctx.Done():
 		return StreamResult{}, ctx.Err()
 	}
 	return col.result(), nil

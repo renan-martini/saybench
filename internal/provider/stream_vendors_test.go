@@ -108,17 +108,42 @@ func TestOpenAIRealtimeAgainstLocalServer(t *testing.T) {
 		ctx := r.Context()
 		c.Write(ctx, websocket.MessageText, []byte(`{"type":"transcription_session.created"}`))
 		var appends int
+		sessionOK := false
 		for {
 			_, msg, err := c.Read(ctx)
 			if err != nil {
 				return
 			}
 			var ev struct {
-				Type string `json:"type"`
+				Type    string `json:"type"`
+				Session struct {
+					Type  string `json:"type"`
+					Audio struct {
+						Input struct {
+							Format struct {
+								Type string `json:"type"`
+								Rate int    `json:"rate"`
+							} `json:"format"`
+						} `json:"input"`
+					} `json:"audio"`
+				} `json:"session"`
 			}
 			json.Unmarshal(msg, &ev)
 			switch ev.Type {
+			case "session.update":
+				// GA dialect: reject anything else, like the real API does.
+				if ev.Session.Type != "transcription" || ev.Session.Audio.Input.Format.Type != "audio/pcm" || ev.Session.Audio.Input.Format.Rate != 24000 {
+					c.Write(ctx, websocket.MessageText, []byte(`{"type":"error","error":{"message":"invalid session shape"}}`))
+					c.Close(websocket.StatusPolicyViolation, "bad session")
+					return
+				}
+				sessionOK = true
 			case "input_audio_buffer.append":
+				if !sessionOK {
+					c.Write(ctx, websocket.MessageText, []byte(`{"type":"error","error":{"message":"audio before session.update"}}`))
+					c.Close(websocket.StatusPolicyViolation, "no session")
+					return
+				}
 				appends++
 				if appends == 1 {
 					time.Sleep(5 * time.Millisecond) // realistic think-time so TTFP is measurably > 0
@@ -126,8 +151,8 @@ func TestOpenAIRealtimeAgainstLocalServer(t *testing.T) {
 				}
 			case "input_audio_buffer.commit":
 				c.Write(ctx, websocket.MessageText, []byte(`{"type":"conversation.item.input_audio_transcription.completed","transcript":"hello world"}`))
-				c.Close(websocket.StatusNormalClosure, "")
-				return
+				// Like the real API: the server does NOT close after
+				// completed — the client must close once it has its result.
 			}
 		}
 	}))
@@ -189,6 +214,35 @@ func TestAssemblyAIStreamAgainstLocalServer(t *testing.T) {
 	}
 	if res.Text != "hello world" || res.Interims != 1 {
 		t.Fatalf("result wrong: %+v", res)
+	}
+}
+
+func TestOpenAIRealtimeSurfacesServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		// Reject immediately with an error event, like the real API does on a
+		// bad session — the adapter must surface the message, not swallow it
+		// behind "use of closed network connection".
+		c.Read(ctx)
+		c.Write(ctx, websocket.MessageText, []byte(`{"type":"error","error":{"message":"invalid session shape"}}`))
+		c.Close(websocket.StatusPolicyViolation, "bad session")
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("SAYBENCH_OPENAI_REALTIME_URL", wsURL(srv))
+	p, _ := NewOpenAIRealtime()
+	_, err := p.StreamTranscribe(context.Background(), testWAV(t))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "invalid session shape") {
+		t.Fatalf("server error event not surfaced: %v", err)
 	}
 }
 
