@@ -18,6 +18,7 @@ import (
 
 	"github.com/renan-martini/saybench/internal/dashboard"
 	"github.com/renan-martini/saybench/internal/manifest"
+	"github.com/renan-martini/saybench/internal/mcp"
 	"github.com/renan-martini/saybench/internal/pricing"
 	"github.com/renan-martini/saybench/internal/provider"
 	"github.com/renan-martini/saybench/internal/report"
@@ -47,6 +48,8 @@ func main() {
 		err = cmdS2S(ctx, os.Args[2:])
 	case "tts":
 		err = cmdTTS(ctx, os.Args[2:])
+	case "mcp":
+		err = mcp.Serve(os.Stdin, os.Stdout, version)
 	case "compare":
 		err = cmdCompare(os.Args[2:])
 	case "html":
@@ -77,6 +80,7 @@ Usage:
   saybench llm     -targets fake-llm,gpt-4o-mini,openai-ws:gpt-4o-mini,groq:<m>,openrouter:<m>,custom:<m> [-warmup=false]
   saybench s2s     -providers fake-s2s,openai,custom [-score echo] [-turn-ending server_vad]
   saybench tts     -providers fake-tts,openai,elevenlabs,custom [-texts llm/golden.jsonl]
+  saybench mcp     # Model Context Protocol server on stdio — for coding agents
   saybench compare old.json new.json [-max-wer-regression 2.0]
   saybench html    -o dashboard.html run1.json run2.json ...
   saybench show    report.json [-format json]
