@@ -37,6 +37,10 @@ jobs:
           ./saybench llm -targets fake-llm -prompts llm/golden.jsonl -report llm.json
           ./saybench llm -targets fake-llm -warmup=false -prompts llm/golden.jsonl -report llmcold.json
           ./saybench compare llmcold.json llm.json 2>&1 | grep -q "warning: comparing"
+          ./saybench s2s -providers fake-s2s -manifest golden/manifest.jsonl -report s2s.json
+          ./saybench show s2s.json | grep -q "V2V FIRST AUDIO"
+          ./saybench html -o s2sdash.html s2s.json
+          grep -q "saybench dashboard" s2sdash.html
           ./saybench show llm.json | grep -q "TTFT"
           ./saybench html -o llmdash.html llm.json
           grep -q "saybench dashboard" llmdash.html

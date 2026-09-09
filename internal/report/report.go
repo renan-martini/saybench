@@ -21,6 +21,7 @@ const (
 	ModeBatch     = "batch"
 	ModeStreaming = "streaming"
 	ModeLLM       = "llm"
+	ModeS2S       = "s2s"
 )
 
 // ItemResult is one (provider, clip) outcome.
@@ -49,6 +50,10 @@ type ItemResult struct {
 	TTFTMS       int    `json:"ttft_ms,omitempty"`
 	CompletionMS int    `json:"completion_ms,omitempty"`
 	OutputTokens int    `json:"output_tokens,omitempty"`
+	// S2S-mode fields: the turn-taking numbers.
+	V2VFirstAudioMS int `json:"v2v_first_audio_ms,omitempty"`
+	ResponseDoneMS  int `json:"response_done_ms,omitempty"`
+	OutputAudioMS   int `json:"output_audio_ms,omitempty"`
 	// Keyterm recall: of the clip's important terms, how many survived
 	// transcription intact. MissedKeyterms names the casualties.
 	KeytermsTotal  int      `json:"keyterms_total,omitempty"`
@@ -84,6 +89,11 @@ type Summary struct {
 	P95TTFTMS       int64   `json:"p95_ttft_ms,omitempty"`
 	AvgCompletionMS int64   `json:"avg_completion_ms,omitempty"`
 	AvgTokensPerSec float64 `json:"avg_tokens_per_sec,omitempty"`
+	// S2S-mode aggregates.
+	AvgV2VFirstAudioMS int64 `json:"avg_v2v_first_audio_ms,omitempty"`
+	P95V2VFirstAudioMS int64 `json:"p95_v2v_first_audio_ms,omitempty"`
+	AvgResponseDoneMS  int64 `json:"avg_response_done_ms,omitempty"`
+	AvgOutputAudioMS   int64 `json:"avg_output_audio_ms,omitempty"`
 }
 
 // CategorySummary aggregates one provider within one failure-mode category.
@@ -126,6 +136,7 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 		ttfps, lags           []int64
 		ttfts, completions    []int64
 		tokRates              []float64
+		v2vs, dones, outAudio []int64
 	}
 	byProvider := map[string]*agg{}
 	type catKey struct{ p, c string }
@@ -166,6 +177,11 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 					decode := float64(it.CompletionMS-it.TTFTMS) / 1000
 					x.tokRates = append(x.tokRates, float64(it.OutputTokens)/decode)
 				}
+			}
+			if mode == ModeS2S {
+				x.v2vs = append(x.v2vs, int64(it.V2VFirstAudioMS))
+				x.dones = append(x.dones, int64(it.ResponseDoneMS))
+				x.outAudio = append(x.outAudio, int64(it.OutputAudioMS))
 			}
 		}
 	}
@@ -210,12 +226,17 @@ func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Repor
 				s.AvgTokensPerSec = sum / float64(len(a.tokRates))
 			}
 		}
+		if mode == ModeS2S {
+			s.AvgV2VFirstAudioMS, s.P95V2VFirstAudioMS = avgP95(a.v2vs)
+			s.AvgResponseDoneMS, _ = avgP95(a.dones)
+			s.AvgOutputAudioMS, _ = avgP95(a.outAudio)
+		}
 		summaries = append(summaries, s)
 	}
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Provider < summaries[j].Provider })
 
 	var cats []CategorySummary
-	if mode == ModeLLM {
+	if mode == ModeLLM || mode == ModeS2S {
 		byCat = nil // per-category WER does not exist here; item rows keep categories
 	}
 	for k, a := range byCat {

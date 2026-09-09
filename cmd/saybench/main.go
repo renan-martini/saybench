@@ -23,7 +23,7 @@ import (
 	"github.com/renan-martini/saybench/internal/runner"
 )
 
-const version = "0.7.0"
+const version = "0.8.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -41,6 +41,8 @@ func main() {
 		err = cmdStream(ctx, os.Args[2:])
 	case "llm":
 		err = cmdLLM(ctx, os.Args[2:])
+	case "s2s":
+		err = cmdS2S(ctx, os.Args[2:])
 	case "compare":
 		err = cmdCompare(os.Args[2:])
 	case "html":
@@ -69,6 +71,7 @@ Usage:
   saybench stt     -providers fake,deepgram,openai [-manifest golden/manifest.jsonl] [-report out.json] [-format json]
   saybench stream  -providers fake-stream,deepgram,openai-realtime,assemblyai [same flags]
   saybench llm     -targets fake-llm,gpt-4o-mini,openai-ws:gpt-4o-mini,groq:<m>,openrouter:<m>,custom:<m> [-warmup=false]
+  saybench s2s     -providers fake-s2s,openai,custom [-manifest golden/manifest.jsonl]
   saybench compare old.json new.json [-max-wer-regression 2.0]
   saybench html    -o dashboard.html run1.json run2.json ...
   saybench show    report.json [-format json]
@@ -217,6 +220,68 @@ func cmdStream(ctx context.Context, args []string) error {
 	return nil
 }
 
+func cmdS2S(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("s2s", flag.ExitOnError)
+	providers := fs.String("providers", "fake-s2s", "comma-separated: fake-s2s, openai, custom (OpenAI-Realtime-dialect endpoint via SAYBENCH_S2S_URL)")
+	manifestPath := fs.String("manifest", "golden/manifest.jsonl", "path to a JSONL corpus manifest (clips are the user's turns)")
+	reportPath := fs.String("report", "", "write the full JSON report here")
+	format := fs.String("format", "table", "stdout format: table or json")
+	workers := fs.Int("workers", 2, "concurrent conversations")
+	timeout := fs.Duration("timeout", 120*time.Second, "per-turn timeout (audio feeds at real-time pace)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	items, err := manifest.Load(*manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) && *manifestPath == "golden/manifest.jsonl" {
+			return fmt.Errorf("default corpus not found (run from a clone of the repo, or point -manifest at your own JSONL corpus): %w", err)
+		}
+		return err
+	}
+	refs := make(map[string]string, len(items))
+	for _, it := range items {
+		refs[it.Audio] = it.Reference
+	}
+	ps, err := provider.S2SFromSpecs(*providers, refs)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "saybench: %d turns × %d providers (real-time pace, one conversation per clip)\n", len(items), len(ps))
+	results := runner.RunS2S(ctx, ps, items, runner.Options{
+		Workers:     *workers,
+		ItemTimeout: *timeout,
+		Progress: func(done, total int) {
+			fmt.Fprintf(os.Stderr, "\r%d/%d", done, total)
+			if done == total {
+				fmt.Fprintln(os.Stderr)
+			}
+		},
+	})
+	if ctx.Err() != nil {
+		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
+	}
+	rep := report.BuildMode(version, *manifestPath, report.ModeS2S, results)
+	switch *format {
+	case "table":
+		printSummary(rep)
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown -format %q (table or json)", *format)
+	}
+	if *reportPath != "" {
+		if err := rep.Save(*reportPath); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "report written to %s\n", *reportPath)
+	}
+	return nil
+}
+
 func cmdLLM(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("llm", flag.ExitOnError)
 	targets := fs.String("targets", "fake-llm", "comma-separated [provider:]model targets")
@@ -285,6 +350,15 @@ func cmdLLM(ctx context.Context, args []string) error {
 
 func printSummary(r report.Report) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	if r.Mode == report.ModeS2S {
+		fmt.Fprintln(w, "PROVIDER\tTURNS\tERRORS\tV2V FIRST AUDIO AVG\tV2V P95\tRESPONSE DONE AVG\tSPEECH OUT AVG")
+		for _, s := range r.Summaries {
+			fmt.Fprintf(w, "%s\t%d\t%d\t%dms\t%dms\t%dms\t%dms\n",
+				s.Provider, s.Items, s.Errors, s.AvgV2VFirstAudioMS, s.P95V2VFirstAudioMS, s.AvgResponseDoneMS, s.AvgOutputAudioMS)
+		}
+		w.Flush()
+		return
+	}
 	if r.Mode == report.ModeLLM {
 		fmt.Fprintln(w, "TARGET\tPROMPTS\tERRORS\tTTFT AVG\tTTFT P95\tCOMPLETION AVG\tTOK/S")
 		for _, s := range r.Summaries {

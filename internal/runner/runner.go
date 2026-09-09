@@ -231,6 +231,70 @@ func Warmup(ctx context.Context, targets []provider.LLMTarget, timeout time.Dura
 	return errs
 }
 
+// RunS2S benchmarks speech-to-speech providers: one conversational turn per
+// clip, latency-only (phase 1 — see the s2s design spec).
+func RunS2S(ctx context.Context, providers []provider.S2SProvider, items []manifest.Item, opts Options) []report.ItemResult {
+	if opts.Workers <= 0 {
+		opts.Workers = 2 // realtime sessions are heavy; be polite by default
+	}
+	if opts.ItemTimeout <= 0 {
+		opts.ItemTimeout = 120 * time.Second
+	}
+	type job struct {
+		p    provider.S2SProvider
+		item manifest.Item
+		idx  int
+	}
+	jobs := make([]job, 0, len(providers)*len(items))
+	for _, p := range providers {
+		for _, it := range items {
+			jobs = append(jobs, job{p: p, item: it, idx: len(jobs)})
+		}
+	}
+	results := make([]report.ItemResult, len(jobs))
+	ch := make(chan job)
+	var done int
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for range opts.Workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range ch {
+				results[j.idx] = runOneS2S(ctx, j.p, j.item, opts.ItemTimeout)
+				if opts.Progress != nil {
+					mu.Lock()
+					done++
+					opts.Progress(done, len(jobs))
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	for _, j := range jobs {
+		ch <- j
+	}
+	close(ch)
+	wg.Wait()
+	return results
+}
+
+func runOneS2S(ctx context.Context, p provider.S2SProvider, it manifest.Item, timeout time.Duration) report.ItemResult {
+	res := report.ItemResult{Provider: p.Name(), Audio: it.Audio, Category: it.Category, Reference: it.Reference}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	out, err := p.Converse(cctx, it.Audio)
+	if err != nil {
+		res.Error = err.Error()
+		return res
+	}
+	res.Hypothesis = out.Transcript
+	res.V2VFirstAudioMS = out.V2VFirstAudioMS
+	res.ResponseDoneMS = out.ResponseDoneMS
+	res.OutputAudioMS = out.OutputAudioMS
+	return res
+}
+
 func runOneLLM(ctx context.Context, t provider.LLMTarget, p manifest.Prompt, timeout time.Duration) report.ItemResult {
 	res := report.ItemResult{Provider: t.Name(), Prompt: p.Name, Category: p.Category}
 	cctx, cancel := context.WithTimeout(ctx, timeout)

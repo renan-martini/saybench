@@ -202,3 +202,28 @@ func TestWarmupRoundTripAndConditionNote(t *testing.T) {
 		t.Fatalf("same-condition note should be empty, got %q", note)
 	}
 }
+
+func TestS2SAggregation(t *testing.T) {
+	items := []ItemResult{
+		{Provider: "openai:gpt-realtime", Category: "names", V2VFirstAudioMS: 400, ResponseDoneMS: 2000, OutputAudioMS: 1500},
+		{Provider: "openai:gpt-realtime", Category: "faq", V2VFirstAudioMS: 800, ResponseDoneMS: 3000, OutputAudioMS: 2500},
+		{Provider: "openai:gpt-realtime", Error: "boom"},
+	}
+	r := BuildMode("t", "golden/manifest.jsonl", ModeS2S, items)
+	if r.Mode != ModeS2S {
+		t.Fatalf("mode = %q", r.Mode)
+	}
+	s := r.Summaries[0]
+	if s.AvgV2VFirstAudioMS != 600 || s.P95V2VFirstAudioMS != 800 {
+		t.Fatalf("v2v agg wrong: %+v", s)
+	}
+	if s.AvgResponseDoneMS != 2500 || s.AvgOutputAudioMS != 2000 {
+		t.Fatalf("done/output agg wrong: %+v", s)
+	}
+	if s.Errors != 1 {
+		t.Fatalf("errors wrong: %+v", s)
+	}
+	if len(r.Categories) != 0 {
+		t.Fatal("s2s mode must omit category summaries (they would render WER)")
+	}
+}

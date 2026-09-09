@@ -107,3 +107,24 @@ func TestWarmup(t *testing.T) {
 		t.Fatalf("warmup calls = %d, want exactly 1", ct.calls)
 	}
 }
+
+func TestRunS2SWithFake(t *testing.T) {
+	dir := t.TempDir()
+	audio := filepath.Join(dir, "clip.wav")
+	if err := os.WriteFile(audio, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	items := []manifest.Item{{Audio: audio, Reference: "what are your hours", Category: "faq"}}
+	refs := map[string]string{audio: items[0].Reference}
+	results := RunS2S(context.Background(), []provider.S2SProvider{provider.NewFakeS2S(refs)}, items, Options{Workers: 2})
+	if len(results) != 1 {
+		t.Fatalf("got %d results", len(results))
+	}
+	r := results[0]
+	if r.Error != "" {
+		t.Fatalf("unexpected error: %s", r.Error)
+	}
+	if r.V2VFirstAudioMS <= 0 || r.ResponseDoneMS <= 0 || r.OutputAudioMS <= 0 || r.Hypothesis == "" {
+		t.Fatalf("s2s fields wrong: %+v", r)
+	}
+}

@@ -31,6 +31,12 @@ measure it. Order is intent, not promise.
   and decode tok/s over a voice-agent-shaped prompt set. Third report mode;
   dashboard follows. (WebSocket-transport comparison stays below.)
 
+- **v0.8** — **S2S phase 1**: `saybench s2s` measures voice-to-voice
+  latency (turn end → first output audio), response-done time, and speech-out
+  duration against speech-to-speech models — OpenAI Realtime today, any
+  OpenAI-Realtime-dialect endpoint via `custom`, one-file adapters for the
+  rest. Deterministic turn ending; the reply transcript is captured per turn
+  as phase-2 raw material.
 - **v0.7** — **Transport dimension + warmup**: `openai-ws:model` benches the
   same model over the Responses API WebSocket mode (one persistent
   connection, prompts serialized — the voice-loop shape); `-warmup` (default
@@ -40,33 +46,11 @@ measure it. Order is intent, not promise.
 
 ## Next
 
-### 2. Speech-to-speech (S2S) models
-The field is collapsing STT → LLM → TTS into single speech-native models
-(OpenAI Realtime speech-to-speech, Gemini Live, Amazon Nova Sonic, and the
-open-weights wave behind them). A voice-stack benchmark that cannot measure
-them ages badly, so S2S gets its own mode rather than a bolt-on. Two phases:
-
-**Phase 1 — voice-to-voice latency.** Feed a paced user utterance over the
-model's realtime socket and measure end-of-user-speech → first output audio
-byte: the turn-taking number that defines whether an agent feels alive. Plus
-response-completion time and cost per audio-minute. Objective, directly
-comparable across vendors, and it reuses the existing WebSocket + real-time
-pacing plumbing (the OpenAI Realtime adapter already speaks the right
-protocol family).
-
-**Phase 2 — comprehension scoring via echo elicitation.** An S2S model's
-"transcription accuracy" is invisible — it never emits a transcript of what
-it heard, only a reply. The trick: instruct the session to *repeat back
-verbatim what it heard*, then score the model's own output-audio transcript
-(vendors emit one alongside the audio) against the reference with the
-existing WER + keyterm machinery. That turns the whole golden set, category
-system, and keyterm recall into an S2S comprehension benchmark — measuring
-hearing and speaking through one loop. Stated limitation: it scores the
-echo task, not free conversation; judge-scored conversational quality stays
-out of scope.
-
-Same no-blending rule as batch vs streaming: S2S reports get their own mode.
-Later phase: barge-in latency (how fast the model shuts up when interrupted).
+### S2S phase 2 — comprehension via echo elicitation
+Instruct the session to repeat back verbatim what it heard, then score the
+model's own reply transcript with the existing WER + keyterm machinery —
+turning the golden set into an S2S comprehension benchmark. Plus: server-VAD
+posture as a labeled dimension, barge-in latency, and a Gemini Live adapter.
 
 ### 3. TTS time-to-first-audio
 The other half of response latency: how long from send to the first audible

@@ -117,6 +117,24 @@ Two honest readings of that table. First, **TTFT dominates**: completion lands o
 
 The bundled `llm/golden.jsonl` is voice-agent-shaped — short system prompts, brief histories, disfluent user turns, small token caps — because that's the workload a conversation loop actually runs, not essay generation. Latency only, by design: outputs are captured in the report for reading, and quality judging is a separate roadmap item rather than a half-measure bolted onto a latency bench.
 
+## S2S mode: benchmarking the models that replace the whole pipeline
+
+Speech-to-speech models collapse STT → LLM → TTS into one speech-native model — and their defining number is **voice-to-voice latency**: the instant the user's turn ends until the first byte of spoken reply. `saybench s2s` feeds each golden clip as a conversational turn at real-time pace and measures exactly that, plus response-done time and how long the agent talks back:
+
+```
+$ saybench s2s -providers fake-s2s
+
+PROVIDER  TURNS  ERRORS  V2V FIRST AUDIO AVG  V2V P95  RESPONSE DONE AVG  SPEECH OUT AVG
+fake-s2s  14     0       503ms                690ms    1917ms             1217ms
+```
+
+- **Deterministic turn ending** (`turn_detection: null` + explicit commit + `response.create`), same doctrine as streaming: V2V is measured from a known instant, not the server VAD's guess. Server-VAD posture is a separate follow-up dimension, never blended in.
+- **One fresh connection per clip, deliberately** — the opposite of the LLM-WS rule, for a reason: realtime sessions are stateful conversations, and separate clips must be separate conversations.
+- **Agnostic by construction:** `openai` (Realtime speech-to-speech, default `gpt-realtime`, overridable) works today; **`custom` points the same OpenAI-Realtime dialect at your own endpoint** via `SAYBENCH_S2S_URL` — emerging S2S vendors clone that dialect the way everyone cloned chat completions. Anything that doesn't is a one-file adapter behind the two-method `S2SProvider` interface (Gemini Live is the named next one).
+- The model's own transcript of its spoken reply is captured per turn — the raw material for phase 2 (comprehension scoring via echo elicitation, see [ROADMAP.md](ROADMAP.md)) — but nothing is scored yet: phase 1 is latency, stated plainly.
+
+The `openai` S2S adapter is protocol-tested against a local mock (GA and beta event names both handled — the Realtime rename has bitten this codebase before) and awaits live verification.
+
 ## The dashboard
 
 `saybench html -o dashboard.html run1.json run2.json ...` renders any set of reports into a **single self-contained HTML file** — no server, no CDN, no build step. Latest-run summary, A/B comparison between any two runs, WER trend across runs, per-category and latency charts, keyterm recall, and a worst-clips table with the exact missed terms. Commit it as a CI artifact and every PR gets a visual diff of its voice pipeline.
