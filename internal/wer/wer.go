@@ -52,9 +52,10 @@ func Normalize(s string) []string {
 // Compute aligns hypothesis words against reference words with a standard
 // Levenshtein DP and backtracks to attribute each edit.
 func Compute(reference, hypothesis string) Counts {
-	ref := Normalize(reference)
-	hyp := Normalize(hypothesis)
+	return computeWords(Normalize(reference), Normalize(hypothesis))
+}
 
+func computeWords(ref, hyp []string) Counts {
 	n, m := len(ref), len(hyp)
 	// dp[i][j] = min edits aligning ref[:i] with hyp[:j].
 	dp := make([][]int, n+1)
@@ -155,4 +156,59 @@ func WordSurvival(final string, interims []string) (hit, total int) {
 		}
 	}
 	return hit, total
+}
+
+// Opts tunes scoring.
+type Opts struct {
+	// DigitNormalize canonicalizes single-digit words and digit strings
+	// before comparison, so "4739028" scores equal to "four seven three
+	// nine zero two eight". Scope limit, stated plainly: single-digit
+	// equivalence only — full number semantics ("$247.63" vs "two hundred
+	// forty seven dollars") is real NLP and out of scope.
+	DigitNormalize bool
+}
+
+var digitWords = map[string]string{
+	"zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+	"five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+}
+
+// normalizeOpts applies Normalize plus any opt-in canonicalizations.
+func normalizeOpts(s string, o Opts) []string {
+	words := Normalize(s)
+	if !o.DigitNormalize {
+		return words
+	}
+	var out []string
+	for _, w := range words {
+		if d, ok := digitWords[w]; ok {
+			out = append(out, d)
+			continue
+		}
+		if isDigits(w) {
+			for _, r := range w {
+				out = append(out, string(r))
+			}
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// ComputeOpts is Compute with scoring options.
+func ComputeOpts(reference, hypothesis string, o Opts) Counts {
+	return computeWords(normalizeOpts(reference, o), normalizeOpts(hypothesis, o))
 }

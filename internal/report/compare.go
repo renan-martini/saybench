@@ -90,6 +90,9 @@ func ConditionNote(a, b Report) string {
 	if a.S2SScoring != b.S2SScoring && (a.S2SScoring != "" || b.S2SScoring != "") {
 		return fmt.Sprintf("warning: comparing a %q s2s run with a %q s2s run — the tasks differ (echo replies are short and scored; conversational replies are free-form), so latency and speech-out deltas mix conditions", orConv(a.S2SScoring), orConv(b.S2SScoring))
 	}
+	if a.Normalization != b.Normalization {
+		return fmt.Sprintf("warning: comparing runs with different scoring normalization (%q vs %q) — WER deltas mix conditions", a.Normalization, b.Normalization)
+	}
 	if a.Warmup != b.Warmup {
 		name := func(w bool) string {
 			if w {

@@ -21,6 +21,7 @@ import (
 	"github.com/renan-martini/saybench/internal/provider"
 	"github.com/renan-martini/saybench/internal/report"
 	"github.com/renan-martini/saybench/internal/runner"
+	"github.com/renan-martini/saybench/internal/wer"
 )
 
 const version = "0.9.0"
@@ -99,6 +100,7 @@ func cmdSTT(ctx context.Context, args []string) error {
 	manifestPath := fs.String("manifest", "golden/manifest.jsonl", "path to a JSONL corpus manifest")
 	reportPath := fs.String("report", "", "write the full JSON report here")
 	format := fs.String("format", "table", "stdout format: table or json (json is the full report, machine- and LLM-readable)")
+	normalize := fs.String("normalize", "", `"" (literal scoring) | "digits" — canonicalize digit strings vs spelled digits before scoring`)
 	workers := fs.Int("workers", 4, "concurrent transcriptions")
 	timeout := fs.Duration("timeout", 60*time.Second, "per-clip timeout")
 	if err := fs.Parse(args); err != nil {
@@ -120,11 +122,16 @@ func cmdSTT(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	score, err := scoreOpts(*normalize)
+	if err != nil {
+		return err
+	}
 
 	fmt.Fprintf(os.Stderr, "saybench: %d clips × %d providers\n", len(items), len(ps))
 	results := runner.Run(ctx, ps, items, runner.Options{
 		Workers:     *workers,
 		ItemTimeout: *timeout,
+		Score:       score,
 		Progress: func(done, total int) {
 			fmt.Fprintf(os.Stderr, "\r%d/%d", done, total)
 			if done == total {
@@ -136,6 +143,7 @@ func cmdSTT(ctx context.Context, args []string) error {
 		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
 	}
 	rep := report.Build(version, *manifestPath, results)
+	rep.Normalization = *normalize
 	switch *format {
 	case "table":
 		printSummary(rep)
@@ -166,6 +174,7 @@ func cmdStream(ctx context.Context, args []string) error {
 	format := fs.String("format", "table", "stdout format: table or json")
 	workers := fs.Int("workers", 4, "concurrent streams")
 	timeout := fs.Duration("timeout", 120*time.Second, "per-clip timeout (must exceed clip duration — audio feeds at real-time pace)")
+	normalize := fs.String("normalize", "", `"" | "digits" — canonicalize digit strings vs spelled digits before scoring`)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -184,10 +193,15 @@ func cmdStream(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	score, err := scoreOpts(*normalize)
+	if err != nil {
+		return err
+	}
 	fmt.Fprintf(os.Stderr, "saybench: streaming %d clips × %d providers (real-time pace)\n", len(items), len(ps))
 	results := runner.RunStream(ctx, ps, items, runner.Options{
 		Workers:     *workers,
 		ItemTimeout: *timeout,
+		Score:       score,
 		Progress: func(done, total int) {
 			fmt.Fprintf(os.Stderr, "\r%d/%d", done, total)
 			if done == total {
@@ -199,6 +213,7 @@ func cmdStream(ctx context.Context, args []string) error {
 		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
 	}
 	rep := report.BuildMode(version, *manifestPath, report.ModeStreaming, results)
+	rep.Normalization = *normalize
 	switch *format {
 	case "table":
 		printSummary(rep)
@@ -229,6 +244,7 @@ func cmdS2S(ctx context.Context, args []string) error {
 	workers := fs.Int("workers", 2, "concurrent conversations")
 	timeout := fs.Duration("timeout", 120*time.Second, "per-turn timeout (audio feeds at real-time pace)")
 	score := fs.String("score", "", `"" = conversational (latency only) | "echo" = repeat-back task, comprehension-scored with WER + keyterm recall`)
+	normalize := fs.String("normalize", "", `"" | "digits" — canonicalize digit strings vs spelled digits before echo scoring`)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -252,10 +268,15 @@ func cmdS2S(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "saybench: %d turns × %d providers (real-time pace, one conversation per clip)\n", len(items), len(ps))
+	scoreO, err := scoreOpts(*normalize)
+	if err != nil {
+		return err
+	}
 	results := runner.RunS2S(ctx, ps, items, runner.Options{
 		Workers:     *workers,
 		ItemTimeout: *timeout,
 		EchoScore:   echo,
+		Score:       scoreO,
 		Progress: func(done, total int) {
 			fmt.Fprintf(os.Stderr, "\r%d/%d", done, total)
 			if done == total {
@@ -271,6 +292,7 @@ func cmdS2S(ctx context.Context, args []string) error {
 	if echo {
 		rep.S2SScoring = "echo"
 	}
+	rep.Normalization = *normalize
 	switch *format {
 	case "table":
 		printSummary(rep)
@@ -356,6 +378,18 @@ func cmdLLM(ctx context.Context, args []string) error {
 		fmt.Fprintf(os.Stderr, "report written to %s\n", *reportPath)
 	}
 	return nil
+}
+
+// scoreOpts maps the -normalize flag to scoring options.
+func scoreOpts(normalize string) (wer.Opts, error) {
+	switch normalize {
+	case "":
+		return wer.Opts{}, nil
+	case "digits":
+		return wer.Opts{DigitNormalize: true}, nil
+	default:
+		return wer.Opts{}, fmt.Errorf("unknown -normalize %q (only \"digits\" or empty)", normalize)
+	}
 }
 
 func printSummary(r report.Report) {

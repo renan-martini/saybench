@@ -22,6 +22,9 @@ type Options struct {
 	// EchoScore turns on comprehension scoring for s2s echo runs: the
 	// model's reply transcript is scored against the clip's reference.
 	EchoScore bool
+	// Scoring options (digit normalization etc.) applied wherever WER and
+	// keyterms are computed.
+	Score wer.Opts
 }
 
 // Run benchmarks every provider against every item. Item order in the result
@@ -57,7 +60,7 @@ func Run(ctx context.Context, providers []provider.Provider, items []manifest.It
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				results[j.idx] = runOne(ctx, j.p, j.item, opts.ItemTimeout)
+				results[j.idx] = runOne(ctx, j.p, j.item, opts)
 				if opts.Progress != nil {
 					mu.Lock()
 					done++
@@ -106,7 +109,7 @@ func RunStream(ctx context.Context, providers []provider.StreamingProvider, item
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				results[j.idx] = runOneStream(ctx, j.p, j.item, opts.ItemTimeout)
+				results[j.idx] = runOneStream(ctx, j.p, j.item, opts)
 				if opts.Progress != nil {
 					mu.Lock()
 					done++
@@ -124,14 +127,14 @@ func RunStream(ctx context.Context, providers []provider.StreamingProvider, item
 	return results
 }
 
-func runOneStream(ctx context.Context, p provider.StreamingProvider, it manifest.Item, timeout time.Duration) report.ItemResult {
+func runOneStream(ctx context.Context, p provider.StreamingProvider, it manifest.Item, opts Options) report.ItemResult {
 	res := report.ItemResult{
 		Provider:  p.Name(),
 		Audio:     it.Audio,
 		Category:  it.Category,
 		Reference: it.Reference,
 	}
-	cctx, cancel := context.WithTimeout(ctx, timeout)
+	cctx, cancel := context.WithTimeout(ctx, opts.ItemTimeout)
 	defer cancel()
 	out, err := p.StreamTranscribe(cctx, it.Audio)
 	if err != nil {
@@ -145,7 +148,7 @@ func runOneStream(ctx context.Context, p provider.StreamingProvider, it manifest
 	if len(out.InterimTexts) > 0 {
 		res.InterimSurvivalHit, res.InterimSurvivalTotal = wer.WordSurvival(out.Text, out.InterimTexts)
 	}
-	c := wer.Compute(it.Reference, out.Text)
+	c := wer.ComputeOpts(it.Reference, out.Text, opts.Score)
 	res.Sub, res.Del, res.Ins, res.RefWords = c.Sub, c.Del, c.Ins, c.RefWords
 	res.WER = c.WER()
 	if len(it.Keyterms) > 0 {
@@ -187,7 +190,7 @@ func RunLLM(ctx context.Context, targets []provider.LLMTarget, prompts []manifes
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				results[j.idx] = runOneLLM(ctx, j.t, j.p, opts.ItemTimeout)
+				results[j.idx] = runOneLLM(ctx, j.t, j.p, opts)
 				if opts.Progress != nil {
 					mu.Lock()
 					done++
@@ -264,7 +267,7 @@ func RunS2S(ctx context.Context, providers []provider.S2SProvider, items []manif
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				results[j.idx] = runOneS2S(ctx, j.p, j.item, opts.ItemTimeout, opts.EchoScore)
+				results[j.idx] = runOneS2S(ctx, j.p, j.item, opts)
 				if opts.Progress != nil {
 					mu.Lock()
 					done++
@@ -282,9 +285,9 @@ func RunS2S(ctx context.Context, providers []provider.S2SProvider, items []manif
 	return results
 }
 
-func runOneS2S(ctx context.Context, p provider.S2SProvider, it manifest.Item, timeout time.Duration, echoScore bool) report.ItemResult {
+func runOneS2S(ctx context.Context, p provider.S2SProvider, it manifest.Item, opts Options) report.ItemResult {
 	res := report.ItemResult{Provider: p.Name(), Audio: it.Audio, Category: it.Category, Reference: it.Reference}
-	cctx, cancel := context.WithTimeout(ctx, timeout)
+	cctx, cancel := context.WithTimeout(ctx, opts.ItemTimeout)
 	defer cancel()
 	out, err := p.Converse(cctx, it.Audio)
 	if err != nil {
@@ -295,8 +298,8 @@ func runOneS2S(ctx context.Context, p provider.S2SProvider, it manifest.Item, ti
 	res.V2VFirstAudioMS = out.V2VFirstAudioMS
 	res.ResponseDoneMS = out.ResponseDoneMS
 	res.OutputAudioMS = out.OutputAudioMS
-	if echoScore {
-		c := wer.Compute(it.Reference, out.Transcript)
+	if opts.EchoScore {
+		c := wer.ComputeOpts(it.Reference, out.Transcript, opts.Score)
 		res.Sub, res.Del, res.Ins, res.RefWords = c.Sub, c.Del, c.Ins, c.RefWords
 		res.WER = c.WER()
 		if len(it.Keyterms) > 0 {
@@ -309,9 +312,9 @@ func runOneS2S(ctx context.Context, p provider.S2SProvider, it manifest.Item, ti
 	return res
 }
 
-func runOneLLM(ctx context.Context, t provider.LLMTarget, p manifest.Prompt, timeout time.Duration) report.ItemResult {
+func runOneLLM(ctx context.Context, t provider.LLMTarget, p manifest.Prompt, opts Options) report.ItemResult {
 	res := report.ItemResult{Provider: t.Name(), Prompt: p.Name, Category: p.Category}
-	cctx, cancel := context.WithTimeout(ctx, timeout)
+	cctx, cancel := context.WithTimeout(ctx, opts.ItemTimeout)
 	defer cancel()
 	hist := make([][2]string, 0, len(p.History))
 	for _, m := range p.History {
@@ -329,14 +332,14 @@ func runOneLLM(ctx context.Context, t provider.LLMTarget, p manifest.Prompt, tim
 	return res
 }
 
-func runOne(ctx context.Context, p provider.Provider, it manifest.Item, timeout time.Duration) report.ItemResult {
+func runOne(ctx context.Context, p provider.Provider, it manifest.Item, opts Options) report.ItemResult {
 	res := report.ItemResult{
 		Provider:  p.Name(),
 		Audio:     it.Audio,
 		Category:  it.Category,
 		Reference: it.Reference,
 	}
-	cctx, cancel := context.WithTimeout(ctx, timeout)
+	cctx, cancel := context.WithTimeout(ctx, opts.ItemTimeout)
 	defer cancel()
 
 	start := time.Now()
@@ -352,7 +355,7 @@ func runOne(ctx context.Context, p provider.Provider, it manifest.Item, timeout 
 	res.LatencyMS = latency.Milliseconds()
 	res.Hypothesis = out.Text
 
-	c := wer.Compute(it.Reference, out.Text)
+	c := wer.ComputeOpts(it.Reference, out.Text, opts.Score)
 	res.Sub, res.Del, res.Ins, res.RefWords = c.Sub, c.Del, c.Ins, c.RefWords
 	res.WER = c.WER()
 	if len(it.Keyterms) > 0 {

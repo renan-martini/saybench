@@ -86,3 +86,30 @@ func TestWordSurvival(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeDigits(t *testing.T) {
+	tests := []struct {
+		name     string
+		ref, hyp string
+		wantWER  float64
+	}{
+		{"digit run vs spelled digits", "four seven three nine zero two eight", "4739028", 0},
+		{"spelled vs digit run", "4739028", "four seven three nine zero two eight", 0},
+		{"oh means zero", "one one two oh five", "11205", 0},
+		{"mixed content", "policy four seven and zip", "policy 47 and zip", 0},
+		{"real errors still count", "four seven three", "4 7 9", 1.0 / 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := ComputeOpts(tt.ref, tt.hyp, Opts{DigitNormalize: true})
+			if w := c.WER(); w != tt.wantWER {
+				t.Fatalf("WER = %v, want %v (counts %+v)", w, tt.wantWER, c)
+			}
+		})
+	}
+	// Off by default: unchanged behavior.
+	c := Compute("four seven", "47")
+	if c.WER() == 0 {
+		t.Fatal("digit normalization must be opt-in")
+	}
+}
