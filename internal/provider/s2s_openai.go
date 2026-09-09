@@ -24,6 +24,10 @@ import (
 type realtimeS2S struct {
 	name, base, key, model string
 	instructions           string
+	// serverVAD lets the model detect end-of-speech itself (production
+	// posture). The feed appends a silence tail so the VAD can fire, and
+	// V2V anchors at end of SPEECH — VAD hangover is part of the number.
+	serverVAD bool
 }
 
 const s2sRate = 24000
@@ -73,7 +77,10 @@ func (r *realtimeS2S) Converse(ctx context.Context, audioPath string) (S2SResult
 		}
 		return conn.Write(ctx, websocket.MessageText, b)
 	}
-	// Deterministic turn ending: no server VAD; we commit and ask.
+	var turnDetection any // nil = deterministic commit mode
+	if r.serverVAD {
+		turnDetection = map[string]any{"type": "server_vad"}
+	}
 	if err := send(map[string]any{
 		"type": "session.update",
 		"session": map[string]any{
@@ -82,7 +89,7 @@ func (r *realtimeS2S) Converse(ctx context.Context, audioPath string) (S2SResult
 			"audio": map[string]any{
 				"input": map[string]any{
 					"format":         map[string]any{"type": "audio/pcm", "rate": s2sRate},
-					"turn_detection": nil,
+					"turn_detection": turnDetection,
 				},
 				"output": map[string]any{
 					"format": map[string]any{"type": "audio/pcm", "rate": s2sRate},
@@ -180,15 +187,28 @@ func (r *realtimeS2S) Converse(ctx context.Context, audioPath string) (S2SResult
 	}); err != nil {
 		return failWith("send audio", err)
 	}
-	if err := send(map[string]any{"type": "input_audio_buffer.commit"}); err != nil {
-		return failWith("commit", err)
+	if r.serverVAD {
+		// The user's turn ends when the speech does; the VAD must notice.
+		// Feed a silence tail so it can — its hangover time is measured.
+		turnEnd = time.Now()
+		turnEndCh <- turnEnd
+		silence := &wav.File{SampleRate: s2sRate, Channels: 1, BitsPerSample: 16, Data: make([]byte, s2sRate*2*3/2)} // 1.5s
+		if _, _, err := feed(ctx, silence, func(chunk []byte) error {
+			return send(map[string]any{"type": "input_audio_buffer.append", "audio": base64.StdEncoding.EncodeToString(chunk)})
+		}); err != nil {
+			return failWith("send silence tail", err)
+		}
+	} else {
+		if err := send(map[string]any{"type": "input_audio_buffer.commit"}); err != nil {
+			return failWith("commit", err)
+		}
+		if err := send(map[string]any{"type": "response.create"}); err != nil {
+			return failWith("response.create", err)
+		}
+		// The user's turn is over the instant the model is allowed to speak.
+		turnEnd = time.Now()
+		turnEndCh <- turnEnd
 	}
-	if err := send(map[string]any{"type": "response.create"}); err != nil {
-		return failWith("response.create", err)
-	}
-	// The user's turn is over the instant the model is allowed to speak.
-	turnEnd = time.Now()
-	turnEndCh <- turnEnd
 
 	select {
 	case o := <-done:

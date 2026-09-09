@@ -75,7 +75,7 @@ Usage:
   saybench stt     -providers fake,deepgram,openai [-manifest golden/manifest.jsonl] [-report out.json] [-format json]
   saybench stream  -providers fake-stream,deepgram,openai-realtime,assemblyai [same flags]
   saybench llm     -targets fake-llm,gpt-4o-mini,openai-ws:gpt-4o-mini,groq:<m>,openrouter:<m>,custom:<m> [-warmup=false]
-  saybench s2s     -providers fake-s2s,openai,custom [-score echo] [-manifest golden/manifest.jsonl]
+  saybench s2s     -providers fake-s2s,openai,custom [-score echo] [-turn-ending server_vad]
   saybench tts     -providers fake-tts,openai,elevenlabs,custom [-texts llm/golden.jsonl]
   saybench compare old.json new.json [-max-wer-regression 2.0]
   saybench html    -o dashboard.html run1.json run2.json ...
@@ -257,6 +257,7 @@ func cmdS2S(ctx context.Context, args []string) error {
 	timeout := fs.Duration("timeout", 120*time.Second, "per-turn timeout (audio feeds at real-time pace)")
 	score := fs.String("score", "", `"" = conversational (latency only) | "echo" = repeat-back task, comprehension-scored with WER + keyterm recall`)
 	normalize := fs.String("normalize", "", `"" | "digits" — canonicalize digit strings vs spelled digits before echo scoring`)
+	turnEnding := fs.String("turn-ending", "commit", `"commit" (deterministic) | "server_vad" (production posture — V2V includes VAD hangover; a 1.5s silence tail is appended so the VAD can fire)`)
 	pricingPath := fs.String("pricing", "", "pricing table JSON (see pricing.example.json); adds cost columns")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -265,6 +266,9 @@ func cmdS2S(ctx context.Context, args []string) error {
 		return fmt.Errorf("unknown -score %q (only \"echo\" or empty)", *score)
 	}
 	echo := *score == "echo"
+	if *turnEnding != "commit" && *turnEnding != "server_vad" {
+		return fmt.Errorf("unknown -turn-ending %q", *turnEnding)
+	}
 	items, err := manifest.Load(*manifestPath)
 	if err != nil {
 		if os.IsNotExist(err) && *manifestPath == "golden/manifest.jsonl" {
@@ -276,7 +280,7 @@ func cmdS2S(ctx context.Context, args []string) error {
 	for _, it := range items {
 		refs[it.Audio] = it.Reference
 	}
-	ps, err := provider.S2SFromSpecs(*providers, refs, echo)
+	ps, err := provider.S2SFromSpecsOpts(*providers, refs, provider.S2SOpts{Echo: echo, TurnEnding: *turnEnding})
 	if err != nil {
 		return err
 	}
@@ -309,6 +313,7 @@ func cmdS2S(ctx context.Context, args []string) error {
 		rep.S2SScoring = "echo"
 	}
 	rep.Normalization = *normalize
+	rep.S2STurnEnding = *turnEnding
 	switch *format {
 	case "table":
 		printSummary(rep)

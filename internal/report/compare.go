@@ -90,6 +90,9 @@ func ConditionNote(a, b Report) string {
 	if a.S2SScoring != b.S2SScoring && (a.S2SScoring != "" || b.S2SScoring != "") {
 		return fmt.Sprintf("warning: comparing a %q s2s run with a %q s2s run — the tasks differ (echo replies are short and scored; conversational replies are free-form), so latency and speech-out deltas mix conditions", orConv(a.S2SScoring), orConv(b.S2SScoring))
 	}
+	if a.S2STurnEnding != b.S2STurnEnding && (a.S2STurnEnding != "" || b.S2STurnEnding != "") {
+		return fmt.Sprintf("warning: comparing s2s runs with different turn-ending (%q vs %q) — server_vad V2V includes VAD hangover; deltas mix semantics", orCommit(a.S2STurnEnding), orCommit(b.S2STurnEnding))
+	}
 	if a.Normalization != b.Normalization {
 		return fmt.Sprintf("warning: comparing runs with different scoring normalization (%q vs %q) — WER deltas mix conditions", a.Normalization, b.Normalization)
 	}
@@ -108,6 +111,13 @@ func ConditionNote(a, b Report) string {
 func orConv(s string) string {
 	if s == "" {
 		return "conversational"
+	}
+	return s
+}
+
+func orCommit(s string) string {
+	if s == "" {
+		return "commit"
 	}
 	return s
 }

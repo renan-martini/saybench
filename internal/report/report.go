@@ -133,7 +133,10 @@ type Report struct {
 	S2SScoring string `json:"s2s_scoring,omitempty"`
 	// Normalization records the scoring canonicalization ("", "digits").
 	// A different normalization is a different experiment.
-	Normalization string            `json:"normalization,omitempty"`
+	Normalization string `json:"normalization,omitempty"`
+	// S2STurnEnding records "commit" or "server_vad" — different V2V
+	// semantics (server_vad includes VAD hangover), different experiments.
+	S2STurnEnding string            `json:"s2s_turn_ending,omitempty"`
 	Tool          string            `json:"tool"`
 	ToolVersion   string            `json:"tool_version"`
 	CreatedAt     time.Time         `json:"created_at"`

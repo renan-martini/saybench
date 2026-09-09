@@ -184,3 +184,76 @@ func TestS2SFromSpecsEchoInstructions(t *testing.T) {
 		t.Fatal("echo flag must reach the fake provider")
 	}
 }
+
+func TestOpenAIS2SServerVAD(t *testing.T) {
+	var sawCommit, sawCreate bool
+	var vadRequested bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		c.Write(ctx, websocket.MessageText, []byte(`{"type":"session.created"}`))
+		var audioMsgs int
+		for {
+			_, msg, err := c.Read(ctx)
+			if err != nil {
+				return
+			}
+			var ev struct {
+				Type    string `json:"type"`
+				Session struct {
+					Audio struct {
+						Input struct {
+							TurnDetection struct {
+								Type string `json:"type"`
+							} `json:"turn_detection"`
+						} `json:"input"`
+					} `json:"audio"`
+				} `json:"session"`
+			}
+			json.Unmarshal(msg, &ev)
+			switch ev.Type {
+			case "session.update":
+				vadRequested = ev.Session.Audio.Input.TurnDetection.Type == "server_vad"
+			case "input_audio_buffer.commit":
+				sawCommit = true
+			case "response.create":
+				sawCreate = true
+			case "input_audio_buffer.append":
+				audioMsgs++
+				// After enough audio (speech + the silence tail), the VAD
+				// "detects" end of turn and responds on its own.
+				if audioMsgs == 20 {
+					half := base64.StdEncoding.EncodeToString(make([]byte, 4800))
+					c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.output_audio.delta","delta":"`+half+`"}`))
+					c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.output_audio_transcript.delta","delta":"Hello."}`))
+					c.Write(ctx, websocket.MessageText, []byte(`{"type":"response.done"}`))
+				}
+			}
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("SAYBENCH_OPENAI_S2S_URL", wsURL(srv))
+	ps, err := S2SFromSpecsOpts("openai", nil, S2SOpts{TurnEnding: "server_vad"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := ps[0].Converse(context.Background(), testWAV(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !vadRequested {
+		t.Fatal("session must request server_vad turn detection")
+	}
+	if sawCommit || sawCreate {
+		t.Fatal("server_vad mode must not send commit or response.create — the VAD owns the turn")
+	}
+	if res.V2VFirstAudioMS <= 0 || res.Transcript != "Hello." {
+		t.Fatalf("result wrong: %+v", res)
+	}
+}

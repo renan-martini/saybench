@@ -40,7 +40,22 @@ type S2SProvider interface {
 // comparability across runs and vendors depends on the task being identical.
 const echoInstructions = "Repeat back exactly, word for word, what the caller just said. Say nothing else — no acknowledgment, no commentary."
 
+// S2SOpts tunes s2s runs.
+type S2SOpts struct {
+	// Echo swaps to the fixed repeat-back task (phase 2).
+	Echo bool
+	// TurnEnding: "commit" (default — deterministic) or "server_vad" (the
+	// production posture: the model detects end-of-speech itself; measured
+	// V2V then INCLUDES VAD hangover time, which is the point).
+	TurnEnding string
+}
+
 func S2SFromSpecs(specs string, refs map[string]string, echo bool) ([]S2SProvider, error) {
+	return S2SFromSpecsOpts(specs, refs, S2SOpts{Echo: echo})
+}
+
+func S2SFromSpecsOpts(specs string, refs map[string]string, o S2SOpts) ([]S2SProvider, error) {
+	echo := o.Echo
 	var out []S2SProvider
 	seen := map[string]bool{}
 	for _, s := range strings.Split(specs, ",") {
@@ -73,6 +88,7 @@ func S2SFromSpecs(specs string, refs map[string]string, echo bool) ([]S2SProvide
 			if echo {
 				p.instructions = echoInstructions
 			}
+			p.serverVAD = o.TurnEnding == "server_vad"
 			out = append(out, p)
 		case "custom":
 			base := os.Getenv("SAYBENCH_S2S_URL")
@@ -84,6 +100,7 @@ func S2SFromSpecs(specs string, refs map[string]string, echo bool) ([]S2SProvide
 			if echo {
 				p.instructions = echoInstructions
 			}
+			p.serverVAD = o.TurnEnding == "server_vad"
 			out = append(out, p)
 		default:
 			return nil, fmt.Errorf("unknown s2s provider %q (known: fake-s2s, openai, custom)", s)
