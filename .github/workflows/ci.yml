@@ -31,3 +31,6 @@ jobs:
           ./saybench html -o dash.html base.json again.json
           grep -q "saybench dashboard" dash.html
           ./saybench show base.json | grep -q "KEYTERM RECALL"
+          ./saybench stream -providers fake-stream -manifest golden/manifest.jsonl -report stream.json
+          ./saybench show stream.json | grep -q "FINAL LAG"
+          if ./saybench compare base.json stream.json; then echo "cross-mode compare must fail" && exit 1; fi

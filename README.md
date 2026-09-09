@@ -46,6 +46,27 @@ That table hides a better story, which is exactly why saybench reports more than
 - **Keyterm recall catches what WER buries.** One vendor transcribed the Kubernetes deployment as "the Cuba Needs deployment" — a 15% WER clip, but a 100% useless transcript for a technical support call. Both vendors dropped the name "Priya Raghunathan". That's the metric that decides whether a voice agent can say your customer's name back.
 - **Latency is a real axis:** ~926ms vs ~1319ms average round-trip on identical clips.
 
+## Streaming mode: the numbers a live call feels
+
+`saybench stream` feeds your audio at **real-time pace** (50 ms PCM chunks on a wall clock) over each vendor's streaming API and measures what batch mode can't:
+
+- **Time-to-first-partial** — first audio byte sent → first interim received. When your captions can start moving.
+- **Finalization lag** — end of audio → last final segment. The dead air before your LLM can even start thinking.
+- **Interim count** — how many interim updates arrived (a churn proxy; a word-survival stability score is on the roadmap).
+
+WER, categories, and keyterm recall still score the final transcript. Streaming and batch reports carry a `mode` field, and `compare` **refuses** to compare across modes — the two latencies measure different things, and a delta between them would be a lie.
+
+```bash
+saybench stream -providers fake-stream                              # offline, zero keys
+saybench stream -providers deepgram,openai-realtime,assemblyai -report stream.json
+```
+
+Streaming vendors: Deepgram live, OpenAI Realtime (transcription intent), AssemblyAI Universal-Streaming — each adapter is exercised in CI against a local WebSocket server speaking that vendor's documented protocol. Every endpoint takes a URL override (`SAYBENCH_DEEPGRAM_STREAM_URL`, `SAYBENCH_OPENAI_REALTIME_URL`, `SAYBENCH_ASSEMBLYAI_STREAM_URL`) so self-hosted or compatible servers bench without code changes.
+
+### Adding your own provider
+
+Implement two methods — `Name()` and `StreamTranscribe(ctx, audioPath)` (or `Transcribe` for batch) — and register the spec string. `internal/provider/assemblyai_stream.go` is the smallest streaming template: dial, feed paced chunks via the shared `feed` helper, map the vendor's interim/final messages onto the shared `collector`, done. PRs welcome; the protocol test pattern in `stream_vendors_test.go` is the contract.
+
 ## The dashboard
 
 `saybench html -o dashboard.html run1.json run2.json ...` renders any set of reports into a **single self-contained HTML file** — no server, no CDN, no build step. Latest-run summary, A/B comparison between any two runs, WER trend across runs, per-category and latency charts, keyterm recall, and a worst-clips table with the exact missed terms. Commit it as a CI artifact and every PR gets a visual diff of its voice pipeline.

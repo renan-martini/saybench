@@ -81,3 +81,56 @@ func TestAllErrorsNeverReportsPerfectWER(t *testing.T) {
 		t.Fatalf("unscored run counted as regression: %v", worst)
 	}
 }
+
+func TestStreamingAggregation(t *testing.T) {
+	items := []ItemResult{
+		{Provider: "p", WER: 0.1, Sub: 1, RefWords: 10, LatencyMS: 900, TTFPartialMS: 200, FinalLagMS: 300, Interims: 5},
+		{Provider: "p", WER: 0.0, RefWords: 10, LatencyMS: 1100, TTFPartialMS: 400, FinalLagMS: 500, Interims: 7},
+	}
+	r := BuildMode("t", "m", ModeStreaming, items)
+	if r.Mode != ModeStreaming {
+		t.Fatalf("mode = %q", r.Mode)
+	}
+	s := r.Summaries[0]
+	if s.AvgTTFPartialMS != 300 || s.AvgFinalLagMS != 400 {
+		t.Fatalf("streaming averages wrong: %+v", s)
+	}
+	if s.P95TTFPartialMS != 400 || s.P95FinalLagMS != 500 {
+		t.Fatalf("streaming p95 wrong: %+v", s)
+	}
+}
+
+func TestBatchModeDefaultAndRoundTrip(t *testing.T) {
+	r := Build("t", "m", []ItemResult{{Provider: "p", RefWords: 5, LatencyMS: 10}})
+	if r.Mode != ModeBatch {
+		t.Fatalf("Build must produce batch mode, got %q", r.Mode)
+	}
+	p := filepath.Join(t.TempDir(), "r.json")
+	if err := r.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Mode != ModeBatch {
+		t.Fatalf("mode lost in round trip: %q", got.Mode)
+	}
+}
+
+func TestCompareRefusesMixedModes(t *testing.T) {
+	batch := Build("t", "m", []ItemResult{{Provider: "p", RefWords: 5}})
+	stream := BuildMode("t", "m", ModeStreaming, []ItemResult{{Provider: "p", RefWords: 5}})
+	if err := CheckComparable(batch, stream); err == nil {
+		t.Fatal("expected error comparing batch vs streaming")
+	}
+	if err := CheckComparable(batch, batch); err != nil {
+		t.Fatalf("same-mode compare must pass: %v", err)
+	}
+	// A pre-mode report (empty string) counts as batch.
+	old := batch
+	old.Mode = ""
+	if err := CheckComparable(old, batch); err != nil {
+		t.Fatalf("legacy empty mode must equal batch: %v", err)
+	}
+}

@@ -16,13 +16,19 @@ measure it. Order is intent, not promise.
   file with A/B run comparison, WER trends, category/latency charts, and a
   worst-clips table.
 
+- **v0.4** — **Streaming STT**: `saybench stream` feeds audio at real-time
+  pace over vendor WebSocket APIs (Deepgram live, OpenAI Realtime,
+  AssemblyAI Universal-Streaming) and measures time-to-first-partial,
+  finalization lag, and interim count. Mode-tagged reports; `compare`
+  refuses cross-mode deltas; adapters tested against local protocol
+  servers. (Interim *stability* — word-survival rate — remains below.)
+
 ## Next
 
-### 1. Streaming STT latency
-Batch round-trip is comparable but it is not what a live call feels like. Add
-streaming benchmarks: time-to-first-partial, finalization lag after end of
-speech, and interim-result stability — the numbers that decide whether an
-agent talks over its caller. Reported separately from batch, never blended.
+### 1. Interim stability scoring
+Of the words in the final transcript, the fraction that appeared unchanged in
+an earlier interim ("word-survival rate"). High = interims are trustworthy
+previews; low = any UI built on them lies until finalization.
 
 ### 2. LLM conversation-loop benchmarking
 Streamed time-to-first-token and full completion time for the models driving

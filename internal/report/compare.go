@@ -14,6 +14,22 @@ type Delta struct {
 	OnlyInNew bool    `json:"only_in_new,omitempty"`
 }
 
+// CheckComparable rejects cross-mode comparison: batch and streaming latency
+// measure different things and a delta between them is a lie.
+func CheckComparable(a, b Report) error {
+	ma, mb := a.Mode, b.Mode
+	if ma == "" {
+		ma = ModeBatch
+	}
+	if mb == "" {
+		mb = ModeBatch
+	}
+	if ma != mb {
+		return fmt.Errorf("cannot compare a %s report with a %s report — the latency semantics differ", ma, mb)
+	}
+	return nil
+}
+
 // Compare aligns two reports by provider name.
 func Compare(old, cur Report) []Delta {
 	oldBy := map[string]Summary{}

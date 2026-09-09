@@ -23,7 +23,7 @@ import (
 	"github.com/renan-martini/saybench/internal/runner"
 )
 
-const version = "0.3.0"
+const version = "0.4.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -37,6 +37,8 @@ func main() {
 	switch os.Args[1] {
 	case "stt":
 		err = cmdSTT(ctx, os.Args[2:])
+	case "stream":
+		err = cmdStream(ctx, os.Args[2:])
 	case "compare":
 		err = cmdCompare(os.Args[2:])
 	case "html":
@@ -62,16 +64,22 @@ func usage() {
 	fmt.Print(`saybench — benchmark speech-to-text on your own audio
 
 Usage:
-  saybench stt     -providers fake,deepgram,openai [-manifest golden/manifest.jsonl] [-report out.json]
+  saybench stt     -providers fake,deepgram,openai [-manifest golden/manifest.jsonl] [-report out.json] [-format json]
+  saybench stream  -providers fake-stream,deepgram,openai-realtime,assemblyai [same flags]
   saybench compare old.json new.json [-max-wer-regression 2.0]
   saybench html    -o dashboard.html run1.json run2.json ...
   saybench show    report.json [-format json]
   saybench version
 
 Providers read API keys from the environment only:
-  deepgram   DEEPGRAM_API_KEY   (model: SAYBENCH_DEEPGRAM_MODEL, default nova-3)
-  openai     OPENAI_API_KEY     (model: SAYBENCH_OPENAI_MODEL, default gpt-4o-mini-transcribe)
-  fake       no key — deterministic offline provider for CI and demos
+  deepgram          DEEPGRAM_API_KEY   (model: SAYBENCH_DEEPGRAM_MODEL, default nova-3)
+  openai            OPENAI_API_KEY     (model: SAYBENCH_OPENAI_MODEL, default gpt-4o-mini-transcribe)
+  openai-realtime   OPENAI_API_KEY     (model: SAYBENCH_OPENAI_REALTIME_MODEL)
+  assemblyai        ASSEMBLYAI_API_KEY
+  fake, fake-stream no key — deterministic offline providers for CI and demos
+
+Streaming endpoints take URL overrides for self-hosted/compatible servers:
+  SAYBENCH_DEEPGRAM_STREAM_URL, SAYBENCH_OPENAI_REALTIME_URL, SAYBENCH_ASSEMBLYAI_STREAM_URL
 `)
 }
 
@@ -140,12 +148,83 @@ func cmdSTT(ctx context.Context, args []string) error {
 	return nil
 }
 
+func cmdStream(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("stream", flag.ExitOnError)
+	providers := fs.String("providers", "fake-stream", "comma-separated: fake-stream, deepgram, openai-realtime, assemblyai")
+	manifestPath := fs.String("manifest", "golden/manifest.jsonl", "path to a JSONL corpus manifest")
+	reportPath := fs.String("report", "", "write the full JSON report here")
+	format := fs.String("format", "table", "stdout format: table or json")
+	workers := fs.Int("workers", 4, "concurrent streams")
+	timeout := fs.Duration("timeout", 120*time.Second, "per-clip timeout (must exceed clip duration — audio feeds at real-time pace)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	items, err := manifest.Load(*manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) && *manifestPath == "golden/manifest.jsonl" {
+			return fmt.Errorf("default corpus not found (run from a clone of the repo, or point -manifest at your own JSONL corpus): %w", err)
+		}
+		return err
+	}
+	refs := make(map[string]string, len(items))
+	for _, it := range items {
+		refs[it.Audio] = it.Reference
+	}
+	ps, err := provider.StreamFromSpecs(*providers, refs)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "saybench: streaming %d clips × %d providers (real-time pace)\n", len(items), len(ps))
+	results := runner.RunStream(ctx, ps, items, runner.Options{
+		Workers:     *workers,
+		ItemTimeout: *timeout,
+		Progress: func(done, total int) {
+			fmt.Fprintf(os.Stderr, "\r%d/%d", done, total)
+			if done == total {
+				fmt.Fprintln(os.Stderr)
+			}
+		},
+	})
+	if ctx.Err() != nil {
+		return fmt.Errorf("interrupted — no report written (partial results would be misleading)")
+	}
+	rep := report.BuildMode(version, *manifestPath, report.ModeStreaming, results)
+	switch *format {
+	case "table":
+		printSummary(rep)
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown -format %q (table or json)", *format)
+	}
+	if *reportPath != "" {
+		if err := rep.Save(*reportPath); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "report written to %s\n", *reportPath)
+	}
+	return nil
+}
+
 func printSummary(r report.Report) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tAVG LATENCY\tP95 LATENCY")
-	for _, s := range r.Summaries {
-		fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%dms\t%dms\n",
-			s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), report.FormatPct(s.KeytermRecall), s.AvgLatencyMS, s.P95LatencyMS)
+	if r.Mode == report.ModeStreaming {
+		fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tTTFP AVG\tTTFP P95\tFINAL LAG AVG\tFINAL LAG P95")
+		for _, s := range r.Summaries {
+			fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%dms\t%dms\t%dms\t%dms\n",
+				s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), report.FormatPct(s.KeytermRecall),
+				s.AvgTTFPartialMS, s.P95TTFPartialMS, s.AvgFinalLagMS, s.P95FinalLagMS)
+		}
+	} else {
+		fmt.Fprintln(w, "PROVIDER\tCLIPS\tERRORS\tWER\tKEYTERM RECALL\tAVG LATENCY\tP95 LATENCY")
+		for _, s := range r.Summaries {
+			fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%dms\t%dms\n",
+				s.Provider, s.Items, s.Errors, report.FormatPct(s.WER), report.FormatPct(s.KeytermRecall), s.AvgLatencyMS, s.P95LatencyMS)
+		}
 	}
 	w.Flush()
 
@@ -250,6 +329,9 @@ func cmdCompare(args []string) error {
 	}
 	new_, err := report.LoadFile(rest[1])
 	if err != nil {
+		return err
+	}
+	if err := report.CheckComparable(old, new_); err != nil {
 		return err
 	}
 	deltas := report.Compare(old, new_)

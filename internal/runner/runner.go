@@ -71,6 +71,85 @@ func Run(ctx context.Context, providers []provider.Provider, items []manifest.It
 	return results
 }
 
+// RunStream is Run for streaming providers: same fan-out and scoring, plus
+// the streaming timing fields. Per-item timeout must exceed clip duration —
+// streaming feeds audio at real-time pace by design.
+func RunStream(ctx context.Context, providers []provider.StreamingProvider, items []manifest.Item, opts Options) []report.ItemResult {
+	if opts.Workers <= 0 {
+		opts.Workers = 4
+	}
+	if opts.ItemTimeout <= 0 {
+		opts.ItemTimeout = 120 * time.Second
+	}
+	type job struct {
+		p    provider.StreamingProvider
+		item manifest.Item
+		idx  int
+	}
+	jobs := make([]job, 0, len(providers)*len(items))
+	for _, p := range providers {
+		for _, it := range items {
+			jobs = append(jobs, job{p: p, item: it, idx: len(jobs)})
+		}
+	}
+	results := make([]report.ItemResult, len(jobs))
+	ch := make(chan job)
+	var done int
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for range opts.Workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range ch {
+				results[j.idx] = runOneStream(ctx, j.p, j.item, opts.ItemTimeout)
+				if opts.Progress != nil {
+					mu.Lock()
+					done++
+					opts.Progress(done, len(jobs))
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	for _, j := range jobs {
+		ch <- j
+	}
+	close(ch)
+	wg.Wait()
+	return results
+}
+
+func runOneStream(ctx context.Context, p provider.StreamingProvider, it manifest.Item, timeout time.Duration) report.ItemResult {
+	res := report.ItemResult{
+		Provider:  p.Name(),
+		Audio:     it.Audio,
+		Category:  it.Category,
+		Reference: it.Reference,
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	out, err := p.StreamTranscribe(cctx, it.Audio)
+	if err != nil {
+		res.Error = err.Error()
+		return res
+	}
+	res.Hypothesis = out.Text
+	res.TTFPartialMS = out.TTFPartialMS
+	res.FinalLagMS = out.FinalLagMS
+	res.Interims = out.Interims
+	c := wer.Compute(it.Reference, out.Text)
+	res.Sub, res.Del, res.Ins, res.RefWords = c.Sub, c.Del, c.Ins, c.RefWords
+	res.WER = c.WER()
+	if len(it.Keyterms) > 0 {
+		hit, missed := wer.KeytermHits(out.Text, it.Keyterms)
+		res.KeytermsTotal = len(it.Keyterms)
+		res.KeytermsHit = len(hit)
+		res.MissedKeyterms = missed
+	}
+	return res
+}
+
 func runOne(ctx context.Context, p provider.Provider, it manifest.Item, timeout time.Duration) report.ItemResult {
 	res := report.ItemResult{
 		Provider:  p.Name(),

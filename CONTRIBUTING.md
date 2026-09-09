@@ -4,8 +4,13 @@ Thanks for the interest — small, sharp PRs are very welcome. The bar:
 
 ## Hard rules
 
-1. **Standard library only.** A new dependency needs a written justification in
-   the PR for why the stdlib can't do it. "It's convenient" is not one.
+1. **Standard library only, with documented exceptions.** A new dependency
+   needs a written justification for why the stdlib can't do it. "It's
+   convenient" is not one. Current exceptions: `github.com/coder/websocket` —
+   the stdlib has no WebSocket client, a hand-rolled RFC 6455 implementation
+   would be ~300 lines of security-sensitive framing code maintained forever,
+   and the library also provides the server side our vendor-protocol tests
+   are written against.
 2. **No secrets, ever.** API keys come from environment variables only. Nothing
    secret in code, tests, fixtures, or git history. CI runs with no keys at all.
 3. **Every HTTP request carries a context deadline.** Every response body read

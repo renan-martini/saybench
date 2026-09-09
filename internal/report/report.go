@@ -11,7 +11,16 @@ import (
 )
 
 // SchemaVersion is bumped on breaking changes to the report format.
+// Streaming fields (mode, ttfp, final lag) were additive and did not bump it.
 const SchemaVersion = 1
+
+// Report modes. They measure different things and must never be blended:
+// batch latency includes upload of the whole file; streaming latency is
+// about partials and finalization under real-time pacing.
+const (
+	ModeBatch     = "batch"
+	ModeStreaming = "streaming"
+)
 
 // ItemResult is one (provider, clip) outcome.
 type ItemResult struct {
@@ -26,6 +35,10 @@ type ItemResult struct {
 	Ins        int     `json:"ins"`
 	RefWords   int     `json:"ref_words"`
 	LatencyMS  int64   `json:"latency_ms"`
+	// Streaming-mode fields (zero in batch mode).
+	TTFPartialMS int `json:"ttf_partial_ms,omitempty"`
+	FinalLagMS   int `json:"final_lag_ms,omitempty"`
+	Interims     int `json:"interims,omitempty"`
 	// Keyterm recall: of the clip's important terms, how many survived
 	// transcription intact. MissedKeyterms names the casualties.
 	KeytermsTotal  int      `json:"keyterms_total,omitempty"`
@@ -49,6 +62,11 @@ type Summary struct {
 	KeytermRecall float64 `json:"keyterm_recall"`
 	AvgLatencyMS  int64   `json:"avg_latency_ms"`
 	P95LatencyMS  int64   `json:"p95_latency_ms"`
+	// Streaming-mode aggregates (zero in batch mode).
+	AvgTTFPartialMS int64 `json:"avg_ttf_partial_ms,omitempty"`
+	P95TTFPartialMS int64 `json:"p95_ttf_partial_ms,omitempty"`
+	AvgFinalLagMS   int64 `json:"avg_final_lag_ms,omitempty"`
+	P95FinalLagMS   int64 `json:"p95_final_lag_ms,omitempty"`
 }
 
 // CategorySummary aggregates one provider within one failure-mode category.
@@ -62,6 +80,7 @@ type CategorySummary struct {
 // Report is a full benchmark run.
 type Report struct {
 	SchemaVersion int               `json:"schema_version"`
+	Mode          string            `json:"mode,omitempty"` // empty in old files = batch
 	Tool          string            `json:"tool"`
 	ToolVersion   string            `json:"tool_version"`
 	CreatedAt     time.Time         `json:"created_at"`
@@ -71,12 +90,18 @@ type Report struct {
 	Items         []ItemResult      `json:"items"`
 }
 
-// Build assembles a report, computing summaries from items.
+// Build assembles a batch-mode report, computing summaries from items.
 func Build(toolVersion, manifestPath string, items []ItemResult) Report {
+	return BuildMode(toolVersion, manifestPath, ModeBatch, items)
+}
+
+// BuildMode assembles a report in the given mode.
+func BuildMode(toolVersion, manifestPath, mode string, items []ItemResult) Report {
 	type agg struct {
 		edits, words, errs, n int
 		ktHit, ktTotal        int
 		latencies             []int64
+		ttfps, lags           []int64
 	}
 	byProvider := map[string]*agg{}
 	type catKey struct{ p, c string }
@@ -104,6 +129,10 @@ func Build(toolVersion, manifestPath string, items []ItemResult) Report {
 			x.ktHit += it.KeytermsHit
 			x.ktTotal += it.KeytermsTotal
 			x.latencies = append(x.latencies, it.LatencyMS)
+			if mode == ModeStreaming {
+				x.ttfps = append(x.ttfps, int64(it.TTFPartialMS))
+				x.lags = append(x.lags, int64(it.FinalLagMS))
+			}
 		}
 	}
 
@@ -127,15 +156,9 @@ func Build(toolVersion, manifestPath string, items []ItemResult) Report {
 	var summaries []Summary
 	for p, a := range byProvider {
 		s := Summary{Provider: p, Items: a.n, Errors: a.errs, WER: rate(a), KeytermRecall: recall(a)}
-		if len(a.latencies) > 0 {
-			sort.Slice(a.latencies, func(i, j int) bool { return a.latencies[i] < a.latencies[j] })
-			var sum int64
-			for _, l := range a.latencies {
-				sum += l
-			}
-			s.AvgLatencyMS = sum / int64(len(a.latencies))
-			s.P95LatencyMS = a.latencies[(len(a.latencies)-1)*95/100]
-		}
+		s.AvgLatencyMS, s.P95LatencyMS = avgP95(a.latencies)
+		s.AvgTTFPartialMS, s.P95TTFPartialMS = avgP95(a.ttfps)
+		s.AvgFinalLagMS, s.P95FinalLagMS = avgP95(a.lags)
 		summaries = append(summaries, s)
 	}
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Provider < summaries[j].Provider })
@@ -153,6 +176,7 @@ func Build(toolVersion, manifestPath string, items []ItemResult) Report {
 
 	return Report{
 		SchemaVersion: SchemaVersion,
+		Mode:          mode,
 		Tool:          "saybench",
 		ToolVersion:   toolVersion,
 		CreatedAt:     time.Now().UTC(),
@@ -186,4 +210,20 @@ func LoadFile(path string) (Report, error) {
 		return r, fmt.Errorf("%s: schema version %d, this build reads %d", path, r.SchemaVersion, SchemaVersion)
 	}
 	return r, nil
+}
+
+// avgP95 uses the nearest-rank definition for p95: the smallest value with
+// at least 95% of observations at or below it. For small n this is the max,
+// which is the honest reading of "p95" on a 14-clip corpus.
+func avgP95(v []int64) (avg, p95 int64) {
+	if len(v) == 0 {
+		return 0, 0
+	}
+	sort.Slice(v, func(i, j int) bool { return v[i] < v[j] })
+	var sum int64
+	for _, x := range v {
+		sum += x
+	}
+	idx := (95*len(v) + 99) / 100 // ceil(0.95n)
+	return sum / int64(len(v)), v[idx-1]
 }

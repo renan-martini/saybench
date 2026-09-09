@@ -146,6 +146,7 @@
 const DATA = JSON.parse(document.getElementById("data").textContent);
 const runs = DATA.runs;
 const latest = runs[runs.length - 1];
+const STREAMING = (latest.mode || "batch") === "streaming";
 
 // ---- provider identity: fixed slot order, stable across every chart ----
 const providers = [...new Set(runs.flatMap(r => (r.summaries || []).map(s => s.provider)))].sort();
@@ -157,7 +158,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":
 const runLabel = (r, i) => `#${i + 1} · ${new Date(r.created_at).toISOString().slice(0, 16).replace("T", " ")}`;
 
 document.getElementById("meta").textContent =
-  `${runs.length} run${runs.length > 1 ? "s" : ""} · generated ${new Date(DATA.generated_at).toISOString().slice(0,16).replace("T"," ")} · v${DATA.version}`;
+  `${latest.mode || "batch"} mode · ${runs.length} run${runs.length > 1 ? "s" : ""} · generated ${new Date(DATA.generated_at).toISOString().slice(0,16).replace("T"," ")} · v${DATA.version}`;
 
 // ---- shared tooltip ----
 const tip = document.getElementById("tip");
@@ -176,13 +177,17 @@ function bindTips(root) {
 
 // ---- latest-run summary table ----
 {
+  const latCols = STREAMING
+    ? s => `<td class="mono">${s.avg_ttf_partial_ms || 0}ms</td><td class="mono">${s.avg_final_lag_ms || 0}ms</td>`
+    : s => `<td class="mono">${s.avg_latency_ms}ms</td><td class="mono">${s.p95_latency_ms}ms</td>`;
+  const latHead = STREAMING ? "<th>ttfp avg</th><th>final lag avg</th>" : "<th>avg latency</th><th>p95</th>";
   const rows = (latest.summaries || []).map(s => `<tr>
     <td><span class="sw" style="background:${colorOf(s.provider)};display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px"></span>${esc(s.provider)}</td>
     <td>${s.items}</td><td>${s.errors}</td><td class="mono">${pct(s.wer)}</td>
     <td class="mono">${pct(s.keyterm_recall)}</td>
-    <td class="mono">${s.avg_latency_ms}ms</td><td class="mono">${s.p95_latency_ms}ms</td></tr>`).join("");
+    ${latCols(s)}</tr>`).join("");
   document.getElementById("summary").innerHTML =
-    `<table><thead><tr><th>provider</th><th>clips</th><th>errors</th><th>wer</th><th>keyterm recall</th><th>avg latency</th><th>p95</th></tr></thead><tbody>${rows}</tbody></table>`;
+    `<table><thead><tr><th>provider</th><th>clips</th><th>errors</th><th>wer</th><th>keyterm recall</th>${latHead}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 // ---- A/B compare ----
@@ -206,10 +211,10 @@ function bindTips(root) {
       return `<tr><td><span style="background:${colorOf(b.provider)};display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px"></span>${esc(b.provider)}</td>
         <td class="mono">${pct(a.wer)} → ${pct(b.wer)}</td><td class="${cls}">${sign}</td>
         <td class="mono">${pct(a.keyterm_recall)} → ${pct(b.keyterm_recall)}</td>
-        <td class="mono">${a.avg_latency_ms}ms → ${b.avg_latency_ms}ms</td></tr>`;
+        <td class="mono">${STREAMING ? (a.avg_ttf_partial_ms || 0) : a.avg_latency_ms}ms → ${STREAMING ? (b.avg_ttf_partial_ms || 0) : b.avg_latency_ms}ms</td></tr>`;
     }).join("");
     document.getElementById("ab").innerHTML =
-      `<table><thead><tr><th>provider</th><th>wer</th><th>change</th><th>keyterm recall</th><th>avg latency</th></tr></thead><tbody>${rows}</tbody></table>`;
+      `<table><thead><tr><th>provider</th><th>wer</th><th>change</th><th>keyterm recall</th><th>${STREAMING ? "ttfp avg" : "avg latency"}</th></tr></thead><tbody>${rows}</tbody></table>`;
   };
   selA.onchange = selB.onchange = render;
   render();
@@ -295,7 +300,12 @@ function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width, labelW) {
 
 // ---- latency bars (avg, with p95 tick) ----
 {
-  const rows = (latest.summaries || []).map(s => ({ label: s.provider, series: [{ provider: s.provider, avg: s.avg_latency_ms, p95: s.p95_latency_ms }] }));
+  if (STREAMING) document.querySelector("#sec-lat h2").textContent = "Streaming latency — latest run";
+  const rows = (latest.summaries || []).map(s => ({ label: s.provider, series: [
+    STREAMING
+      ? { provider: s.provider, avg: s.avg_ttf_partial_ms || 0, p95: s.p95_ttf_partial_ms || 0, lag: s.avg_final_lag_ms || 0 }
+      : { provider: s.provider, avg: s.avg_latency_ms, p95: s.p95_latency_ms },
+  ] }));
   const el = document.getElementById("lat");
   const W = 440, L = 190, R = 64, barH = 16;
   const max = Math.max(...rows.map(r => r.series[0].p95), 1) * 1.15;
@@ -311,8 +321,11 @@ function hbars(el, rows, valueOf, fmt, tipOf, maxHint, width, labelW) {
     g += `<text class="val" x="${L + w + 6}" y="${yPos + barH - 3}">${s.avg}ms</text>`;
     yPos += barH + 14;
   });
+  const note = STREAMING
+    ? "bar = avg time-to-first-partial · tick = p95 · audio fed at real-time pace"
+    : "bar = average · tick = p95 · batch round-trip including upload";
   el.innerHTML = `<svg viewBox="0 0 ${W} ${yPos + 4}">${g}<line class="axis" x1="${L}" x2="${L}" y1="4" y2="${yPos - 6}"/></svg>
-    <p class="note" style="margin-top:.4rem">bar = average · tick = p95 · batch round-trip including upload</p>`;
+    <p class="note" style="margin-top:.4rem">${note}${STREAMING ? " · final lag shown in the summary table" : ""}</p>`;
   bindTips(el);
 }
 
